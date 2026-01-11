@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "learnbase"
+version = "0.2.0"
+description = "Markdown-based learning notes with spaced repetition via MCP"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=0.1.0",
+    "python-frontmatter>=1.1.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
