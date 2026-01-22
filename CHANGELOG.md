@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned
+### Added
 - Explicit priority requests for review sessions
 - In-memory priority tracking in review skill
 - Priority data persistence in session history
+- Priority request tracking at topic level with automatic deactivation after 2 sessions
+- Extended MCP save_session_history schema with priority fields
+- Comprehensive test suite for priority logic (13 tests passing)
 
 ## [0.2.0] - 2026-01-22
 

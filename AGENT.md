@@ -1,6 +1,6 @@
 ---
 name: learnbase
-description: Conduct Socratic, interactive review sessions with LearnBase notes using spaced repetition. Use when user requests review, quiz, or wants to study a specific note. To be used with the learnbase MCP server.
+description: Conduct Socratic, interactive review sessions with LearnBase notes using spaced repetition. Use when user requests review, quiz, revision, revise, study, or wants to learn/study a specific note. Trigger on phrases like "let's revise", "let's review", "quiz me", "study time", "revision session", or "revise my notes". To be used with the learnbase MCP server. 
 ---
 
 # LearnBase Interactive Review Skill
@@ -10,6 +10,8 @@ Guide AI agents in conducting Socratic, interactive review sessions with LearnBa
 
 ## When to Use This Skill
 - User requests review: "quiz me", "test me on X", "what should I review?"
+- User requests revision: "let's revise", "revision time", "revise my notes"
+- User wants to study: "study time", "let's study", "I need to study"
 - User wants to study a specific note
 - Conducting interactive learning sessions
 
@@ -46,6 +48,37 @@ Guide AI agents in conducting Socratic, interactive review sessions with LearnBa
 - Note content (body)
 - Current metadata (frontmatter)
 - Previous question performance (if exists)
+- Priority requests (if exists)
+
+### Step 2.5: Initialize Session Variables
+
+Track these in memory during the session:
+
+```python
+# Question tracking (existing)
+questions_data = []  # List of question data with hashes, scores, etc.
+
+# Priority tracking (NEW)
+priorities_requested = []  # List of {topic, reason} dicts for new priority requests
+priorities_addressed = []  # List of topic strings covered in this session
+```
+
+### Step 2.6: Check Priority Requests
+
+**Read from note frontmatter:**
+- Check `priority_requests` field for active priorities (active=true)
+
+**If active priorities exist:**
+> "I see you've requested focus on these areas:
+> - **{topic_1}** (addressed {count}/2 times)
+> - **{topic_2}** (addressed {count}/2 times)
+>
+> I'll make sure to include questions on these topics."
+
+**Question Generation Impact:**
+- Ensure at least one question covers each active priority topic
+- Prioritize these questions earlier in the session
+- Track which priorities are covered → add to `priorities_addressed` list
 
 ---
 
@@ -107,16 +140,44 @@ Format: Simple question text, no numbers/bullets yet
 
 ### Question Prioritization
 
-**If question_performance exists in frontmatter:**
-```python
-# Sort questions by worst performance first
-priority_order = sorted(questions, key=lambda q: get_score(q.hash, metadata))
-# Ask lowest-scoring questions first
-```
+**Priority Order (highest to lowest):**
 
-**If new note:**
+1. **Explicit priority requests** (user-requested topics)
+   - Check `priority_requests` field in frontmatter
+   - Generate at least 1 question per active priority topic
+   - Ask these questions first
+
+2. **Low-performing questions** (automatic)
+   - Sort by `question_performance` scores (worst first)
+
+3. **New/uncovered content** (no performance data)
+   - Questions on content never asked before
+
+**Algorithm:**
 ```python
-# Present questions in conceptual order (simple → complex)
+def prioritize_questions(note, generated_questions):
+    priority_requests = [r for r in note.priority_requests if r["active"]]
+
+    # Step 1: Ensure priority topics are covered
+    priority_questions = []
+    for req in priority_requests:
+        matching = [q for q in generated_questions if req["topic"].lower() in q.lower()]
+        if matching:
+            priority_questions.append(matching[0])
+            priorities_addressed.append(req["topic"])  # Track for session data
+            generated_questions.remove(matching[0])
+
+    # Step 2: Sort remaining by performance (worst first)
+    if note.question_performance:
+        remaining = sorted(
+            generated_questions,
+            key=lambda q: note.question_performance.get(hash(q), 0.5)
+        )
+    else:
+        remaining = generated_questions  # New note: conceptual order
+
+    # Step 3: Combine
+    return priority_questions + remaining
 ```
 
 ---
@@ -132,7 +193,79 @@ Question {number} of {total}
 {question_text}
 
 {if previous_score exists: "(Previous score: {score}%)"}
+
+{Provide relevant context - see below}
 ```
+
+**CRITICAL - Provide Context for Questions**:
+
+The user CANNOT see the note content while answering. Always provide relevant context to make questions answerable:
+
+1. **Code snippets**: If question asks about code/functions, show the relevant code
+2. **Diagrams/visual aids**: If the note has ASCII diagrams or visual representations, include them
+3. **Scope constraints**: Clarify important context (e.g., "for local MCP servers" vs "remote servers", "in Python" vs general)
+4. **Key definitions**: If question uses specific technical terms from the note, briefly define or show them
+
+**Examples of Missing vs Good Context:**
+
+❌ **Missing context:**
+```
+Question 1 of 4
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+How do MCP servers communicate with Claude Code?
+```
+(User doesn't know if this means local vs remote, can't see architecture diagram)
+
+✅ **With proper context:**
+```
+Question 1 of 4
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+How do **local** MCP servers communicate with Claude Code, and why is this
+architecture important for understanding logging requirements?
+
+Here's the architecture from your note:
+```
+Claude Code Process
+       ↓ (spawns)
+MCP Server Process
+       ↑              ↓
+   STDIN          STDOUT
+   (JSON-RPC)     (JSON-RPC)
+```
+```
+
+❌ **Missing context:**
+```
+Question 3 of 4
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+How does the calculate_next_review function work?
+```
+(User can't see the function implementation)
+
+✅ **With proper context:**
+```
+Question 3 of 4
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+How does the calculate_next_review function determine the next review date?
+
+Here's the relevant code from your note:
+```python
+def calculate_next_review(rating, interval, ease):
+    if rating >= 3:
+        new_interval = interval * ease
+    else:
+        new_interval = 1
+    return new_interval
+```
+
+(Previous score: 75%)
+```
+
+**Rule of thumb**: If you had to look at the note to formulate the question, include that same content with the question. The user is answering from memory without access to the note.
 
 **Wait for user answer**
 
@@ -200,7 +333,7 @@ Use this decision tree:
 ---
 
 #### Evaluation Template (Use for Pass 2)
--
+
 ```
 Note content: {note_body}
 Question: {question}
@@ -359,12 +492,16 @@ Excellent! You've captured the key concepts.
 Model Answer:
 {complete_answer_from_note}
 
+{if question relates to code: Include relevant code snippet from note}
+
 I'd score this {score}%.
 ```
 
+**Note**: When providing the model answer, if the question relates to code examples in the note, include the relevant code snippet to reinforce the correct implementation or pattern.
+
 **Step 2: 🚨 MANDATORY CHECKPOINT**
 ```
-What do you think of this score, and do you have any more questions about this topic?
+Do you agree with this score? Let me know if you have any questions.
 ```
 
 **WAIT FOR USER RESPONSE** ← CRITICAL
@@ -373,6 +510,7 @@ What do you think of this score, and do you have any more questions about this t
 - If user disagrees with score: adjust to their rating
 - If user has questions: answer conversationally using Socratic method
 - Continue answering questions until user is satisfied
+- If user agrees without questions: assume they're satisfied (no further follow-up needed)
 - Confirm final score: "Got it - recording {confirmed_score}%."
 
 **Step 4: Track Score in Memory**
@@ -445,8 +583,12 @@ Actually, {correct_concept}. Let me explain:
 
 {clear_explanation}
 
+{if relates to code: Show relevant code snippet from note}
+
 Does that make sense?
 ```
+
+**Note**: When correcting misconceptions about code, showing the actual code from the note helps clarify the correct implementation.
 
 **Step 3: Confirm Understanding**
 - Ask: "Can you explain it back to me now?"
@@ -454,7 +596,7 @@ Does that make sense?
 - If no: Provide full answer, score 0%, mark for priority
 
 **Step 4: Record and Continue**
-- Track score in memory for session summary
+- Track score in memory for later bulk save
 - Move to next question
 
 ---
@@ -555,13 +697,18 @@ Choose 1, 2, or 3.
      ],
      "overall_rating": 3,
      "average_score": 0.85,
-     "learned_content": []
+     "learned_content": [],
+     "priorities_requested": [
+       {"topic": "SMTP authentication", "reason": "User struggled with this area"}
+     ],
+     "priorities_addressed": ["email protocols"]
    }
    ```
 
    **This single call now:**
    - Saves session history to JSON file
    - Updates question_performance in note frontmatter (applies EMA algorithm)
+   - Updates priority_requests in note frontmatter (new priorities, increment counts, deactivate when threshold reached)
 
 3. If user added learned content, `str_replace` to append to note body:
    ```markdown
@@ -593,16 +740,17 @@ Keep up the great work! 📚
 
 ### Checkpoint 1: Score Agreement & User Questions
 **After every comprehensive answer evaluation:**
-- ✅ MUST ask: "What do you think of this score, and do you have any more questions about this topic?"
+- ✅ MUST ask: "Do you agree with this score? Let me know if you have any questions."
 - ✅ MUST wait for user response
 - ✅ Handle score adjustment if user disagrees
 - ✅ Answer any questions conversationally until user is satisfied
+- ✅ If user agrees without questions, assume they're satisfied (no further follow-up)
 - ✅ Record user's confirmed score (may differ from suggested)
 
 **Example phrases:**
-- "I'd score this 85%. What do you think of this score, and do you have any more questions?"
-- "That's about 90% in my assessment. Does that feel right? Any questions?"
-- "I think that's worth 70%. How does that sit with you, and anything you'd like to clarify?"
+- "I'd score this 85%. Do you agree with this score? Let me know if you have any questions."
+- "That's about 90% in my assessment. Do you agree? Let me know if you have any questions."
+- "I think that's worth 70%. Do you agree with this score? Let me know if you have any questions."
 
 **Why critical**: User self-assessment improves metacognition, and unresolved questions mean incomplete understanding
 
@@ -658,6 +806,7 @@ def generate_question_hash(question: str) -> str:
 - Ask Socratic questions to guide discovery
 - Wait patiently for user responses
 - Give users control over their scoring
+- Show relevant code snippets when questions relate to code
 - Use emojis sparingly (1-2 per message max)
 
 ### ❌ Don't Do This:
@@ -681,6 +830,18 @@ def generate_question_hash(question: str) -> str:
 
 **User has questions:**
 > "Great question! That's an important point to clarify. [Answer]. Does that help, or would you like me to explain it another way?"
+
+**Code-related question:**
+> "Question 3 of 5
+> ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+>
+> What does this function return and when?
+>
+> Here's the relevant code from your note:
+> ```python
+> def is_due(next_review: datetime) -> bool:
+>     return datetime.now() >= next_review
+> ```"
 
 ---
 
@@ -725,27 +886,66 @@ def generate_question_hash(question: str) -> str:
 
 ---
 
-### Session Interrupted
-**User**: "I need to stop, can we continue later?"
+### Session Interrupted (User Quits Early)
 
-**AI Response**:
-> "Of course! Let me save your progress from the questions we've completed.
->
-> [Saves session data with completed questions using save_session_history]
->
-> ✓ Saved progress for {X} questions. Your performance on these questions is now recorded.
->
-> When you're ready to review {note_title} again, just say 'quiz me on {note_title}' and we'll focus on questions you haven't mastered yet. You won't lose this progress!"
+**User Says**: "I need to stop" / "Let's continue later" / "I have to go"
 
-**Implementation**:
-- Call `save_session_history()` with completed questions from memory
-- Include all question data (hash, text, answer, evaluation, score)
-- Omit `overall_rating` field (incomplete session = no SM-2 update)
-- Confirm save was successful before responding to user
+**What to Do**:
 
-**Don't**:
-- Try to force completion
-- Promise a specific review schedule (no SM-2 update happened)
+1. **Acknowledge and Reassure**:
+   "Of course! Let me save your progress from the questions we've completed."
+
+2. **Prepare Session Data** (from memory):
+   ```json
+   {
+     "session_id": "session_2025-01-11T14:30:00Z",
+     "start_time": "2025-01-11T14:30:00Z",
+     "end_time": "2025-01-11T14:45:00Z",
+     "questions": [
+       {
+         "question_hash": "q_abc123",
+         "question_text": "What is...",
+         "user_answer": "...",
+         "evaluation": "COMPREHENSIVE",
+         "score": 0.85,
+         "follow_ups": 1,
+         "user_had_questions": false
+       }
+     ],
+     "average_score": 0.85,
+     "learned_content": []
+   }
+   ```
+   **NOTE: NO overall_rating field - this marks it as incomplete session**
+
+3. **Save Progress**:
+   ```
+   save_session_history(
+       filename="note-filename.md",
+       session_data=session_data
+   )
+   ```
+
+4. **Confirm to User**:
+   "✓ Saved progress for {X} questions. Your performance on these questions is now recorded.
+
+   When you're ready to review {note_title} again, just say 'quiz me on {note_title}' and we'll focus on questions you haven't mastered yet. You won't lose this progress!"
+
+**Important**:
+- DO save question performance (updates note frontmatter)
+- DON'T call `record_review()` (no overall_rating = no SM-2 update)
+- DO include all completed questions in session_data
+- DO calculate average_score from completed questions
+- Session will be marked as incomplete (no overall_rating field)
+- **Note will remain due** (SM-2 schedule unchanged until complete session)
+
+**Why This Works**:
+- Question performance persists via EMA in note frontmatter
+- History file captures partial session for analytics
+- Next session prioritizes questions with low scores
+- Note stays due so user can complete the review later
+
+**Don't**: Try to force completion
 
 ---
 
@@ -776,6 +976,29 @@ def generate_question_hash(question: str) -> str:
 
 ---
 
+### User Requests Priority Focus
+**User**: "I'd like to prioritize this next time" / "Can we focus on X next session?" / "I want to drill down on Y"
+
+**Response**:
+> "Got it! I'll make sure to focus on '{topic}' in your next review session."
+
+**Action**:
+1. Add `{topic, reason}` to in-memory `priorities_requested` list
+2. Continue with current session
+
+**Example**:
+```python
+# User says: "I want to focus on decorators next time"
+priorities_requested.append({
+    "topic": "decorators",
+    "reason": "User requested focus on this area"
+})
+```
+
+**Don't**: Ignore the request or say you'll remember without tracking it
+
+---
+
 ## Success Criteria
 
 A successful review session has:
@@ -801,11 +1024,11 @@ AI: "Great answer! That's 85%."
 
 **Right**:
 ```
-AI: "Great answer! That's 85%. Do you agree?"
+AI: "Great answer! That's 85%. Do you agree with this score? Let me know if you have any questions."
 [Waits for user response]
 User: "Yes"
-AI: "Perfect, recording 85%. Any questions about this topic?"
-[Waits for user response]
+AI: "Perfect, recording 85%."
+[Moves to next question - user didn't ask questions, so assume they're satisfied]
 ```
 
 ---
@@ -830,18 +1053,17 @@ AI: "Exactly! Now you've got the complete picture."
 ### ❌ Mistake 3: Not Waiting for Responses
 **Wrong**:
 ```
-AI: "Do you agree with 85%? Any questions? Great! Next question..."
+AI: "Do you agree with 85%? Let me know if you have questions. Great! Next question..."
+[Doesn't wait for user response]
 ```
 
 **Right**:
 ```
-AI: "Do you agree with 85%?"
+AI: "Do you agree with this score? Let me know if you have any questions."
 [STOPS, waits]
 User: "Yes"
-AI: "Excellent. Any questions about this topic?"
-[STOPS, waits]
-User: "No, I'm good"
-AI: "Perfect! Let's move to the next one."
+AI: "Perfect, recording 85%. Let's move to the next one."
+[User didn't ask questions, so assumes they're satisfied and moves on]
 ```
 
 ---
