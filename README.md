@@ -144,7 +144,15 @@ It will also ask you if you have any questions when it scores your answer.
 At the end of the session, you will be asked if you want to add anything you learned to this note, or to create a new note and store the information there. 
 
 #### Question scores
-Based on your answer, each question is given an ID and a percentage score. This means that if you struggle on a question, or ask to prioritise a question or key concept on the next review, this will be recorded with your note. Essential, the quiz tool is adaptive and should ask you increasingly more relevant questions on your notes based on your previous answers.  
+Based on your answer, each question is given an ID and a percentage score. This means that if you struggle on a question, or ask to prioritise a question or key concept on the next review, this will be recorded with your note. Essential, the quiz tool is adaptive and should ask you increasingly more relevant questions on your notes based on your previous answers.
+
+#### Priority requests
+You can explicitly ask to focus on specific topics in your next review session. Just say something like:
+- "I'd like to prioritize decorators next time"
+- "Can we focus on async/await in the next session?"
+- "I want to drill down on memory management"
+
+The system will track these requests and automatically include questions on those topics in your next review. After you've been quizzed on a priority topic twice, it's automatically removed from your priority list. This works alongside the automatic prioritization of questions you've struggled with.
 
 #### Understanding Ratings
 
