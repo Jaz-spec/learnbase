@@ -39,6 +39,10 @@ class Note:
     last_session_summary: Dict[str, Any] = field(default_factory=dict)  # last session details
     learned_content_count: int = 0  # track note expansions
 
+    # Explicit priority requests from user (topic-level)
+    priority_requests: List[Dict[str, Any]] = field(default_factory=list)  # user-requested focus areas
+    # Structure: [{"topic": str, "reason": str, "requested_at": str, "session_id": str, "addressed_count": int, "active": bool}]
+
     @classmethod
     def from_markdown_file(cls, filepath: Path) -> 'Note':
         """
@@ -75,7 +79,8 @@ class Note:
             question_performance=post.get('question_performance', {}),
             priority_questions=post.get('priority_questions', []),
             last_session_summary=post.get('last_session_summary', {}),
-            learned_content_count=post.get('learned_content_count', 0)
+            learned_content_count=post.get('learned_content_count', 0),
+            priority_requests=post.get('priority_requests', [])
         )
 
     def to_markdown_file(self) -> str:
@@ -98,7 +103,8 @@ class Note:
             'question_performance': self.question_performance,
             'priority_questions': self.priority_questions,
             'last_session_summary': self.last_session_summary,
-            'learned_content_count': self.learned_content_count
+            'learned_content_count': self.learned_content_count,
+            'priority_requests': self.priority_requests
         }
 
         post = frontmatter.Post(self.body, **metadata)
