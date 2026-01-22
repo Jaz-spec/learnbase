@@ -46,6 +46,20 @@ def handle_save_session_history(note_manager: NoteManager, arguments: Any) -> li
             question_scores = [(q["question_hash"], q["score"]) for q in questions]
             note_manager.bulk_update_question_performance(filename, question_scores)
 
+        # Extract and process priority data
+        priorities_requested = session_data.get("priorities_requested", [])
+        priorities_addressed = session_data.get("priorities_addressed", [])
+
+        # Update priority requests if any exist
+        if priorities_requested or priorities_addressed:
+            session_id = session_data.get("session_id", "unknown")
+            note_manager.update_priority_requests(
+                filename,
+                priorities_requested,
+                priorities_addressed,
+                session_id
+            )
+
         # Save to history file (existing behavior)
         note_manager.save_session_history(filename, session_data)
 
@@ -58,6 +72,10 @@ def handle_save_session_history(note_manager: NoteManager, arguments: Any) -> li
         result += f"- Questions answered: {num_questions}\n"
         if num_questions > 0:
             result += f"- Note frontmatter updated with question performance\n"
+        if priorities_requested:
+            result += f"- Added {len(priorities_requested)} new priority request(s)\n"
+        if priorities_addressed:
+            result += f"- Addressed {len(priorities_addressed)} priority topic(s)\n"
         result += f"- History file: ~/.learnbase/history/{filename.replace('.md', '.json')}"
 
         return [TextContent(type="text", text=result)]

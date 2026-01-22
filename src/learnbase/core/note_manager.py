@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Optional, Any, Tuple, Literal
+from typing import List, Optional, Any, Tuple, Literal, Dict
 import re
 import logging
 import json
@@ -648,6 +648,79 @@ class NoteManager:
         self._save_note(note, filepath)
 
         logger.debug(f"Bulk updated {len(question_scores)} question performances for {filename}")
+
+    def update_priority_requests(
+        self,
+        filename: str,
+        new_requests: List[dict],
+        addressed_topics: List[str],
+        session_id: str
+    ) -> None:
+        """
+        Update priority requests based on session activity.
+
+        Args:
+            filename: Note filename
+            new_requests: List of {topic, reason} dicts for new priorities
+            addressed_topics: List of topic strings that were covered
+            session_id: Current session ID
+        """
+        self._validate_filename(filename)
+        note = self._get_note_or_raise(filename)
+
+        ADDRESSED_THRESHOLD = 2
+
+        # Process new priority requests
+        for req in new_requests:
+            topic = req.get("topic")
+            reason = req.get("reason", "User requested focus on this area")
+
+            if not topic:
+                logger.warning(f"Skipping priority request with missing topic: {req}")
+                continue
+
+            # Check if topic already has an active request
+            found = False
+            for existing in note.priority_requests:
+                if existing["topic"].lower() == topic.lower() and existing["active"]:
+                    # Reactivate/update existing request
+                    existing["reason"] = reason
+                    existing["requested_at"] = datetime.now().isoformat()
+                    existing["session_id"] = session_id
+                    found = True
+                    logger.debug(f"Updated existing priority request for '{topic}'")
+                    break
+
+            if not found:
+                # Add new request
+                note.priority_requests.append({
+                    "topic": topic,
+                    "reason": reason,
+                    "requested_at": datetime.now().isoformat(),
+                    "session_id": session_id,
+                    "addressed_count": 0,
+                    "active": True
+                })
+                logger.debug(f"Added new priority request for '{topic}'")
+
+        # Process addressed priorities
+        for topic in addressed_topics:
+            for existing in note.priority_requests:
+                if existing["topic"].lower() == topic.lower() and existing["active"]:
+                    existing["addressed_count"] += 1
+
+                    if existing["addressed_count"] >= ADDRESSED_THRESHOLD:
+                        existing["active"] = False
+                        logger.info(f"Deactivated priority '{topic}' after {existing['addressed_count']} sessions")
+                    else:
+                        logger.debug(f"Incremented priority '{topic}' to {existing['addressed_count']}/{ADDRESSED_THRESHOLD}")
+
+                    break
+
+        # Save updated note
+        filepath = self.notes_dir / filename
+        self._save_note(note, filepath)
+        logger.info(f"Updated priorities for {filename}: {len(new_requests)} new, {len(addressed_topics)} addressed")
 
     def _create_readme(self):
         """Create initial README.md file."""

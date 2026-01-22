@@ -292,7 +292,24 @@ async def list_tools() -> list[Tool]:
                             },
                             "overall_rating": {"type": "number"},
                             "average_score": {"type": "number"},
-                            "learned_content": {"type": "array"}
+                            "learned_content": {"type": "array"},
+                            "priorities_requested": {
+                                "type": "array",
+                                "description": "New priority requests made during this session",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "topic": {"type": "string"},
+                                        "reason": {"type": "string"}
+                                    },
+                                    "required": ["topic"]
+                                }
+                            },
+                            "priorities_addressed": {
+                                "type": "array",
+                                "description": "List of priority topics that were covered in this session",
+                                "items": {"type": "string"}
+                            }
                         }
                     }
                 },
