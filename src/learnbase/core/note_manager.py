@@ -302,7 +302,8 @@ class NoteManager:
     def get_due_notes(
         self,
         limit: Optional[int] = None,
-        review_mode: Optional[Literal['spaced', 'scheduled']] = None
+        review_mode: Optional[Literal['spaced', 'scheduled']] = None,
+        require_verified: bool = False
     ) -> List[Note]:
         """
         Get notes that are due for review.
@@ -310,6 +311,7 @@ class NoteManager:
         Args:
             limit: Maximum number of notes to return
             review_mode: Filter by review mode ('spaced' or 'scheduled')
+            require_verified: Only include verified notes (with sources and confidence >= 0.6)
 
         Returns:
             List of Note instances due for review
@@ -324,11 +326,79 @@ class NoteManager:
         if review_mode:
             due_notes = [n for n in due_notes if n.review_mode == review_mode]
 
+        # Filter by verification status if required
+        if require_verified:
+            due_notes = [
+                n for n in due_notes
+                if n.sources and (n.confidence_score is None or n.confidence_score >= 0.6)
+            ]
+
         # Apply limit
         if limit:
             due_notes = due_notes[:limit]
 
         return due_notes
+
+    def get_notes_needing_verification(self, limit: Optional[int] = None) -> List[Note]:
+        """
+        Get notes that need verification (have no sources).
+
+        Args:
+            limit: Maximum number of notes to return
+
+        Returns:
+            List of Note instances with empty sources, sorted by next_review date
+        """
+        all_notes = self.get_all_notes()
+
+        # Filter notes with no sources
+        unverified_notes = [n for n in all_notes if not n.sources]
+
+        # Already sorted by next_review in get_all_notes()
+
+        # Apply limit
+        if limit:
+            unverified_notes = unverified_notes[:limit]
+
+        return unverified_notes
+
+    def get_notes_with_low_confidence(
+        self,
+        threshold: float = 0.6,
+        limit: Optional[int] = None
+    ) -> List[Note]:
+        """
+        Get notes with confidence score below threshold.
+
+        Args:
+            threshold: Confidence threshold (0.0-1.0), default 0.6
+            limit: Maximum number of notes to return
+
+        Returns:
+            List of Note instances with low confidence, sorted by confidence_score (lowest first)
+        """
+        if not isinstance(threshold, (int, float)):
+            raise ValueError(f"Threshold must be numeric, got {type(threshold).__name__}")
+        if not 0.0 <= threshold <= 1.0:
+            raise ValueError(f"Threshold must be between 0.0 and 1.0, got {threshold}")
+
+        all_notes = self.get_all_notes()
+
+        # Filter notes with confidence score below threshold
+        # Exclude notes with None confidence_score
+        low_confidence_notes = [
+            n for n in all_notes
+            if n.confidence_score is not None and n.confidence_score < threshold
+        ]
+
+        # Sort by confidence score (lowest first)
+        low_confidence_notes.sort(key=lambda n: n.confidence_score)
+
+        # Apply limit
+        if limit:
+            low_confidence_notes = low_confidence_notes[:limit]
+
+        return low_confidence_notes
 
     def update_note_review(self, filename: str, rating: int):
         """

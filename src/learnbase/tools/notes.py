@@ -1,12 +1,30 @@
 """Note CRUD operation handlers."""
 
 import logging
-from typing import Any
+from typing import Any, Literal
 from mcp.types import TextContent
 
 from ..core.note_manager import NoteManager
+from ..core.models import Note
 
 logger = logging.getLogger(__name__)
+
+
+def _get_verification_status(note: Note) -> Literal["unverified", "low_confidence", "verified"]:
+    """
+    Determine verification status for a note.
+
+    Args:
+        note: Note instance
+
+    Returns:
+        Verification status: "unverified", "low_confidence", or "verified"
+    """
+    if not note.sources:
+        return "unverified"
+    if note.confidence_score is not None and note.confidence_score < 0.6:
+        return "low_confidence"
+    return "verified"
 
 
 def handle_add_note(note_manager: NoteManager, arguments: Any) -> list[TextContent]:
@@ -75,8 +93,21 @@ def handle_list_notes(note_manager: NoteManager, arguments: Any) -> list[TextCon
     """Handle list_notes tool."""
     due_only = arguments.get("due_only", False)
     limit = arguments.get("limit")
+    needs_verification = arguments.get("needs_verification", False)
+    low_confidence_threshold = arguments.get("low_confidence_threshold")
+    exclude_unverified = arguments.get("exclude_unverified", False)
 
-    if due_only:
+    # Determine which notes to fetch
+    if needs_verification:
+        notes = note_manager.get_notes_needing_verification(limit=limit)
+        header = "Notes needing verification (no sources)"
+    elif low_confidence_threshold is not None:
+        notes = note_manager.get_notes_with_low_confidence(
+            threshold=low_confidence_threshold,
+            limit=limit
+        )
+        header = f"Notes with confidence < {low_confidence_threshold}"
+    elif due_only:
         notes = note_manager.get_due_notes(limit=limit)
         header = "Notes due for review"
     else:
@@ -84,6 +115,10 @@ def handle_list_notes(note_manager: NoteManager, arguments: Any) -> list[TextCon
         if limit:
             notes = notes[:limit]
         header = "All notes"
+
+    # Apply exclude_unverified filter if requested
+    if exclude_unverified and not (needs_verification or low_confidence_threshold):
+        notes = [n for n in notes if n.sources]
 
     if not notes:
         return [TextContent(
@@ -101,11 +136,25 @@ def handle_list_notes(note_manager: NoteManager, arguments: Any) -> list[TextCon
         else:
             status = f"due in {days} days"
 
-        result += f"### {note.title}\n"
+        # Get verification status
+        verification_status = _get_verification_status(note)
+
+        # Add visual indicator
+        verification_indicator = ""
+        if verification_status == "unverified":
+            verification_indicator = " ⚠️ [UNVERIFIED]"
+        elif verification_status == "low_confidence":
+            verification_indicator = f" ⚠️ [LOW CONFIDENCE: {note.confidence_score:.2f}]"
+
+        result += f"### {note.title}{verification_indicator}\n"
         result += f"- **File**: {note.filename}\n"
         result += f"- **Status**: {status}\n"
         result += f"- **Mode**: {note.review_mode}\n"
-        result += f"- **Reviews**: {note.review_count}, **Ease**: {note.ease_factor:.2f}\n\n"
+        result += f"- **Reviews**: {note.review_count}, **Ease**: {note.ease_factor:.2f}\n"
+        result += f"- **Verification**: {verification_status}"
+        if note.confidence_score is not None:
+            result += f", **Confidence**: {note.confidence_score:.2f}"
+        result += f", **Sources**: {len(note.sources)}\n\n"
 
     return [TextContent(type="text", text=result)]
 
