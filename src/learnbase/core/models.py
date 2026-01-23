@@ -43,6 +43,11 @@ class Note:
     priority_requests: List[Dict[str, Any]] = field(default_factory=list)  # user-requested focus areas
     # Structure: [{"topic": str, "reason": str, "requested_at": str, "session_id": str, "addressed_count": int, "active": bool}]
 
+    # Information validation fields
+    confidence_score: Optional[float] = None  # 0.0-1.0 confidence in note accuracy
+    sources: List[Dict[str, str]] = field(default_factory=list)  # source metadata
+    # Structure: [{"url": str, "title": str (optional), "accessed_date": str (optional), "note": str (optional)}]
+
     @classmethod
     def from_markdown_file(cls, filepath: Path) -> 'Note':
         """
@@ -80,7 +85,9 @@ class Note:
             priority_questions=post.get('priority_questions', []),
             last_session_summary=post.get('last_session_summary', {}),
             learned_content_count=post.get('learned_content_count', 0),
-            priority_requests=post.get('priority_requests', [])
+            priority_requests=post.get('priority_requests', []),
+            confidence_score=post.get('confidence_score'),
+            sources=post.get('sources', [])
         )
 
     def to_markdown_file(self) -> str:
@@ -104,7 +111,9 @@ class Note:
             'priority_questions': self.priority_questions,
             'last_session_summary': self.last_session_summary,
             'learned_content_count': self.learned_content_count,
-            'priority_requests': self.priority_requests
+            'priority_requests': self.priority_requests,
+            'confidence_score': self.confidence_score,
+            'sources': self.sources
         }
 
         post = frontmatter.Post(self.body, **metadata)
@@ -174,6 +183,23 @@ class Note:
         else:
             # First time seeing this question
             self.question_performance[question_hash] = score
+
+    def set_confidence_score(self, score: float):
+        """
+        Set confidence score with validation.
+
+        Args:
+            score: Confidence score (0.0-1.0)
+
+        Raises:
+            ValueError: If score is invalid
+        """
+        if not isinstance(score, (int, float)):
+            raise ValueError(f"Confidence score must be numeric, got {type(score).__name__}")
+        if not 0.0 <= score <= 1.0:
+            raise ValueError(f"Confidence score must be between 0.0 and 1.0, got {score}")
+
+        self.confidence_score = score
 
     @staticmethod
     def create_filename(title: str) -> str:

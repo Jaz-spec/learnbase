@@ -100,6 +100,10 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "enum": ["spaced", "scheduled"],
                         "description": "Filter by review mode (optional)"
+                    },
+                    "require_verified": {
+                        "type": "boolean",
+                        "description": "Only include verified notes (with sources and confidence >= 0.6). Default: false"
                     }
                 }
             }
@@ -151,6 +155,18 @@ async def list_tools() -> list[Tool]:
                     "limit": {
                         "type": "number",
                         "description": "Maximum number of notes to return"
+                    },
+                    "needs_verification": {
+                        "type": "boolean",
+                        "description": "Only show notes with no sources (need verification)"
+                    },
+                    "low_confidence_threshold": {
+                        "type": "number",
+                        "description": "Show notes with confidence score below this threshold (0.0-1.0). Default: 0.6"
+                    },
+                    "exclude_unverified": {
+                        "type": "boolean",
+                        "description": "Exclude notes without sources from results"
                     }
                 }
             }

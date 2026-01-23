@@ -1,19 +1,43 @@
 """Review operation handlers."""
 
 import logging
+from datetime import datetime
 from typing import Any
 from mcp.types import TextContent
 
 from ..core.note_manager import NoteManager
+from ..core.models import Note
 
 logger = logging.getLogger(__name__)
+
+
+def _get_verification_status_indicator(note: Note) -> str:
+    """
+    Get verification status indicator for a note.
+
+    Args:
+        note: Note instance
+
+    Returns:
+        Status indicator string
+    """
+    if not note.sources:
+        return " ⚠️ [UNVERIFIED]"
+    if note.confidence_score is not None and note.confidence_score < 0.6:
+        return f" ⚠️ [LOW CONFIDENCE: {note.confidence_score:.2f}]"
+    return ""
 
 def handle_get_due_notes(note_manager: NoteManager, arguments: Any) -> list[TextContent]:
     """Handle get_due_notes tool."""
     limit = arguments.get("limit")
     review_mode = arguments.get("review_mode")
+    require_verified = arguments.get("require_verified", False)
 
-    notes = note_manager.get_due_notes(limit=limit, review_mode=review_mode)
+    notes = note_manager.get_due_notes(
+        limit=limit,
+        review_mode=review_mode,
+        require_verified=require_verified
+    )
 
     if not notes:
         return [TextContent(
@@ -23,11 +47,34 @@ def handle_get_due_notes(note_manager: NoteManager, arguments: Any) -> list[Text
 
     result = f"Found {len(notes)} note(s) due for review:\n\n"
     for note in notes:
-        result += f"📝 {note.filename}\n"
+        # Calculate days since last review
+        if note.last_reviewed:
+            days_ago = (datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) -
+                       note.last_reviewed.replace(hour=0, minute=0, second=0, microsecond=0)).days
+            if days_ago == 0:
+                last_reviewed_text = "today"
+            elif days_ago == 1:
+                last_reviewed_text = "1 day ago"
+            else:
+                last_reviewed_text = f"{days_ago} days ago"
+        else:
+            last_reviewed_text = "Never"
+
+        result += f"{note.filename}\n"
         result += f"   Title: {note.title}\n"
         result += f"   Mode: {note.review_mode}\n"
-        result += f"   Last reviewed: {note.last_reviewed.strftime('%Y-%m-%d') if note.last_reviewed else 'Never'}\n"
-        result += f"   Review count: {note.review_count}\n\n"
+        result += f"   Last reviewed: {last_reviewed_text}\n"
+        result += f"   Review count: {note.review_count}\n"
+
+        # Add verification status with confidence score
+        if not note.sources:
+            confidence = note.confidence_score if note.confidence_score is not None else 0.0
+            result += f"   Verification: Un-verified (confidence: {confidence:.2f})\n"
+        else:
+            confidence = note.confidence_score if note.confidence_score is not None else 0.0
+            result += f"   Verification: Verified - {len(note.sources)} source(s) (confidence: {confidence:.2f})\n"
+
+        result += "\n"
 
     return [TextContent(type="text", text=result)]
 
