@@ -4,7 +4,7 @@
 Learnbase is a quiz / note reviewing tool that consists of 3 parts:
 - a learnbase directory where you store all of your notes in md files
 - an mcp server that handles the file operations for these notes
-- a skills file that prompts an LLM to carry out socratic, conversational quizzes to review your notes
+- skills files that prompt an LLM to carry out socratic quizzes and verify note accuracy with research
 
 The benefit of this is that the mcp server ensures reliable and controllable interactions with your notes (i.e. Your agent won't accidentally delete everything). The skills file means that once your agent has retrieved your notes data, the rest of the interaction exists just in your chat (so you're not making endless MCP tool calls).
 
@@ -92,27 +92,24 @@ Add this to your Claude Desktop config at `~/Library/Application Support/Claude/
 **Important**: Replace `/absolute/path/to/learnbase` with where you actually put LearnBase.
 
 
-### 3. Add the Review Skill
+### 3. Add the Skills
 
-The AGENT.md file contains detailed instructions that teach your AI how to conduct effective review sessions.
+The `skills/` directory contains two skills that teach your AI how to work with LearnBase:
+- **quiz** - Conducts Socratic review sessions
+- **verify** - Researches and validates note accuracy with sources
 
 **Option 1: Ask Claude to do it** (easiest)
 ```
-"Can you copy the AGENT.md file from this project to my skills directory
-at ~/.claude/skills/learnbase/SKILL.md? Create the directory if needed."
+"Can you copy the skills from this project to my ~/.claude/skills/ directory?"
 ```
 
 **Option 2: Do it manually**
 ```bash
-mkdir -p ~/.claude/skills/learnbase
-cp AGENT.md ~/.claude/skills/learnbase/SKILL.md
+mkdir -p ~/.claude/skills
+cp -r skills/* ~/.claude/skills/
 ```
 
-This skill file teaches the AI how to:
-- Generate thoughtful questions from your notes
-- Use Socratic method to help you discover answers
-- Track which concepts you're struggling with
-- Know when to push you vs when to explain
+See `skills/README.md` for detailed documentation on each skill.
 
 ## Getting Started
 
@@ -124,7 +121,10 @@ Now that LearnBase is set up, here's how to use it:
 2. **Review your notes**: When notes are due, ask:
    "What should I review today?" or "quiz me!"
 
-3. **Check your progress**:
+3. **Verify note accuracy**: Research and add sources to your notes:
+   "What needs verifying?" or "validate this note"
+
+4. **Check your progress**:
    "Show me my learning statistics"
 
 See the sections below for detailed workflows and features.
@@ -164,6 +164,31 @@ At the end of each review, you rate your overall confidence:
 - **4 (Excellent)** - "I could teach this" → Much longer interval
 
 The system learns your pace and adjusts intervals automatically using the SM-2 algorithm.
+
+## Validating notes
+
+LearnBase includes a verification system to help you ensure your notes are accurate and well-sourced.
+
+### How it works
+The verify skill researches your notes to:
+- Find authoritative sources (official docs, academic papers, etc.)
+- Verify claims against primary sources
+- Assign confidence scores (0.0-1.0) based on source quality
+- Suggest specific amendments when needed
+
+### Usage
+```
+"What needs verifying?" - See unverified notes
+"Validate this note" - Research and verify a specific note
+"Find sources for [topic]" - Research a note about a topic
+```
+
+After validation, the skill will:
+1. Show you the sources it found and confidence score
+2. Suggest any amendments to improve accuracy
+3. Ask if you want to update the note with sources and changes
+
+Notes with low confidence scores are flagged in your note list, so you can prioritize improving them.
 
 ## Adding and managing notes
 ### Adding Notes
@@ -217,6 +242,11 @@ next_review: 2025-12-17T10:30:00
 interval_days: 1
 ease_factor: 2.5
 review_count: 0
+confidence_score: 0.85
+sources:
+  - url: "https://docs.python.org/3/c-api/init.html#thread-state-and-the-global-interpreter-lock"
+    title: "Python Documentation - GIL"
+    accessed_date: "2025-12-16"
 ---
 
 # Python's Global Interpreter Lock
@@ -243,8 +273,13 @@ learnbase/                    # Your git clone location
 │       ├── review.py       # Review workflow
 │       ├── stats.py        # Analytics
 │       └── performance.py  # Question performance tracking
+├── skills/                 # AI agent skill files
+│   ├── README.md          # Skills documentation
+│   ├── quiz/              # Review session skill
+│   │   └── SKILL.md
+│   └── verify/            # Note validation skill
+│       └── SKILL.md
 ├── pyproject.toml          # Package configuration
-├── AGENT.md               # Review skill instructions
 └── README.md              # This file
 ```
 
