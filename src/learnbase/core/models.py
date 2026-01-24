@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, Dict, List, Any, Literal
+from typing import Optional, Dict, List, Any, Literal, cast
 from pathlib import Path
 import frontmatter
 
@@ -62,32 +62,69 @@ class Note:
         with open(filepath, 'r', encoding='utf-8') as f:
             post = frontmatter.load(f)
 
+        def parse_datetime(value, default=None):
+            """Parse datetime from string or datetime object."""
+            if value is None:
+                return default
+            if isinstance(value, datetime):
+                return value
+            return datetime.fromisoformat(str(value))
+
+        def parse_float(value, default=0.0):
+            """Parse float from string or numeric value."""
+            if value is None:
+                return default
+            return float(value)
+
+        def parse_int(value, default=0):
+            """Parse int from string or numeric value."""
+            if value is None:
+                return default
+            return int(value)
+
+        def parse_optional_float(value):
+            """Parse optional float from string or numeric value."""
+            if value is None:
+                return None
+            return float(value)
+
+        def parse_list(value, default=None) -> list:
+            """Parse list, returning default if None."""
+            if value is None:
+                return default if default is not None else []
+            return list(value)
+
+        def parse_dict(value, default=None) -> dict:
+            """Parse dict, returning default if None."""
+            if value is None:
+                return default if default is not None else {}
+            return dict(value)
+
         # Parse dates
-        created_at = datetime.fromisoformat(post.get('created', datetime.now().isoformat()))
-        last_reviewed = None
-        if post.get('last_reviewed'):
-            last_reviewed = datetime.fromisoformat(post['last_reviewed'])
-        next_review = datetime.fromisoformat(post.get('next_review', datetime.now().isoformat()))
+        now = datetime.now()
+        created_at = parse_datetime(post.get('created'), now)
+        last_reviewed = parse_datetime(post.get('last_reviewed'))
+        next_review = parse_datetime(post.get('next_review'), now)
 
         return cls(
             filename=filepath.name,
-            title=post.get('title', filepath.stem.replace('-', ' ').title()),
-            body=post.content,
-            review_mode=post.get('review_mode', 'spaced'),
-            schedule_pattern=post.get('schedule_pattern'),
+            title=str(post.get('title', filepath.stem.replace('-', ' ').title())),
+            body=str(post.content),
+            review_mode=cast(Literal['spaced', 'scheduled'], post.get('review_mode', 'spaced')),
+            schedule_pattern=cast(Optional[str], post.get('schedule_pattern')),
             created_at=created_at,
             last_reviewed=last_reviewed,
             next_review=next_review,
-            interval_days=post.get('interval_days', 1),
-            ease_factor=post.get('ease_factor', 2.5),
-            review_count=post.get('review_count', 0),
-            question_performance=post.get('question_performance', {}),
-            priority_questions=post.get('priority_questions', []),
-            last_session_summary=post.get('last_session_summary', {}),
-            learned_content_count=post.get('learned_content_count', 0),
-            priority_requests=post.get('priority_requests', []),
-            confidence_score=post.get('confidence_score'),
-            sources=post.get('sources', [])
+            interval_days=parse_int(post.get('interval_days'), 1),
+            ease_factor=parse_float(post.get('ease_factor'), 2.5),
+            review_count=parse_int(post.get('review_count'), 0),
+            question_performance=cast(Dict[str, float], parse_dict(post.get('question_performance'))),
+            priority_questions=cast(List[str], parse_list(post.get('priority_questions'))),
+            last_session_summary=cast(Dict[str, Any], parse_dict(post.get('last_session_summary'))),
+            learned_content_count=parse_int(post.get('learned_content_count'), 0),
+            priority_requests=cast(List[Dict[str, Any]], parse_list(post.get('priority_requests'))),
+            confidence_score=parse_optional_float(post.get('confidence_score')),
+            sources=cast(List[Dict[str, str]], parse_list(post.get('sources')))
         )
 
     def to_markdown_file(self) -> str:
