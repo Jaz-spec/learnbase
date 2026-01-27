@@ -10,6 +10,7 @@ from mcp.server import Server
 from mcp.types import Tool, TextContent
 
 from .core.note_manager import NoteManager
+from .core.to_learn_manager import ToLearnManager
 from .tools import (
     handle_add_note,
     handle_get_note,
@@ -22,6 +23,11 @@ from .tools import (
     handle_get_stats,
     handle_calculate_next_review,
     handle_save_session_history,
+    handle_add_to_learn,
+    handle_list_to_learn,
+    handle_get_to_learn,
+    handle_remove_to_learn,
+    handle_update_to_learn,
 )
 
 
@@ -52,6 +58,7 @@ setup_logging()
 
 app = Server("learnbase")
 note_manager = NoteManager()
+to_learn_manager = ToLearnManager()
 
 
 @app.list_tools()
@@ -331,6 +338,98 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["filename", "session_data"]
             }
+        ),
+        # To-learn topic management
+        Tool(
+            name="add_to_learn",
+            description="Add a topic to your learning list. Use this when you want to remember something to learn later.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "Topic name"
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "What is this topic related to? (e.g., 'encryption', 'networking', 'linked in')"
+                    },
+                    "detailed": {
+                        "type": "boolean",
+                        "description": "If true, add to detailed section; if false, add to quick table",
+                        "default": False
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Detailed notes (only used if detailed=true)"
+                    }
+                },
+                "required": ["topic"]
+            }
+        ),
+        Tool(
+            name="list_to_learn",
+            description="List all topics you want to learn about.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "include_archived": {
+                        "type": "boolean",
+                        "description": "Include archived topics",
+                        "default": False
+                    }
+                }
+            }
+        ),
+        Tool(
+            name="get_to_learn",
+            description="Get detailed information about a specific learning topic",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "Topic name"
+                    }
+                },
+                "required": ["topic"]
+            }
+        ),
+        Tool(
+            name="remove_to_learn",
+            description="Archive a topic (moves to Archive section). Use when you've learned it or no longer need it.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "Topic name"
+                    }
+                },
+                "required": ["topic"]
+            }
+        ),
+        Tool(
+            name="update_to_learn",
+            description="Update notes or context for an existing learning topic",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "Topic name"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "New notes"
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "New context - what the topic is related to"
+                    }
+                },
+                "required": ["topic"]
+            }
         )
     ]
 
@@ -356,12 +455,24 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         "calculate_next_review": handle_calculate_next_review,
         # Performance tracking
         "save_session_history": handle_save_session_history,
+        # To-learn topic management
+        "add_to_learn": handle_add_to_learn,
+        "list_to_learn": handle_list_to_learn,
+        "get_to_learn": handle_get_to_learn,
+        "remove_to_learn": handle_remove_to_learn,
+        "update_to_learn": handle_update_to_learn,
     }
 
     # Dispatch to handler
     handler = handlers.get(name)
     if handler:
-        return handler(note_manager, arguments)
+        # Use to_learn_manager for to-learn tools, note_manager for others
+        if name.startswith("add_to_learn") or name.startswith("list_to_learn") or \
+           name.startswith("get_to_learn") or name.startswith("remove_to_learn") or \
+           name.startswith("update_to_learn"):
+            return handler(to_learn_manager, arguments)
+        else:
+            return handler(note_manager, arguments)
     else:
         return [TextContent(
             type="text",

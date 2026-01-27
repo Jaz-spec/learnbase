@@ -1,21 +1,30 @@
 # LearnBase - AI Context
 
-An MCP server that enables AI-driven spaced repetition review of markdown notes.
+An MCP server that enables AI-driven spaced repetition review of markdown notes and lightweight learning topic tracking.
 
 ## Core Concept
 
-Notes are markdown files with YAML frontmatter stored in `~/.learnbase/notes/`. The MCP server exposes tools that let AI conduct Socratic review sessions using the SM-2 spaced repetition algorithm.
+**Two complementary systems:**
+
+1. **Review Notes** (`~/.learnbase/notes/`): Markdown files with YAML frontmatter for spaced repetition learning
+2. **To-Learn Topics** (`~/.learnbase/to_learn.md`): Single markdown file for quick capture and tracking of topics to learn
 
 ## Architecture
 
 ```
 src/learnbase/
 ├── core/
-│   ├── models.py         # Note dataclass with frontmatter serialization
-│   ├── note_manager.py   # File I/O for notes directory
-│   └── spaced_rep.py     # SM-2 & scheduled review algorithms
-├── tools/               # MCP tool handlers (notes, review, stats, performance)
-└── mcp_server.py        # MCP server registration
+│   ├── models.py           # Note dataclass with frontmatter serialization
+│   ├── note_manager.py     # File I/O for notes directory
+│   ├── to_learn_manager.py # Single-file manager for learning topics
+│   └── spaced_rep.py       # SM-2 & scheduled review algorithms
+├── tools/                  # MCP tool handlers
+│   ├── notes.py            # Note CRUD operations
+│   ├── review.py           # Review workflow
+│   ├── stats.py            # Statistics
+│   ├── performance.py      # Session tracking
+│   └── to_learn.py         # To-learn topic management
+└── mcp_server.py           # MCP server registration
 ```
 
 ## Note Model
@@ -41,6 +50,8 @@ class Note:
 
 ## MCP Tools
 
+### Review Notes System
+
 **Note Management**: add_note, get_note, list_notes, edit_note, delete_note
 
 **Review Workflow**:
@@ -51,6 +62,18 @@ class Note:
 **Analytics**: get_stats, calculate_next_review
 
 **Performance Tracking**: save_session_history
+
+### To-Learn Topics System
+
+**Topic Management**: add_to_learn, list_to_learn, get_to_learn, update_to_learn, update_to_learn_status, remove_to_learn
+
+**Workflow**:
+1. Quick capture: "I'd like to learn about X later" → `add_to_learn(topic="X", context="...")`
+2. Track progress: `update_to_learn_status(topic="X", status="in-progress")`
+3. Add notes: `update_to_learn(topic="X", notes="Research findings...")`
+4. Complete: `update_to_learn_status(topic="X", status="learned")` → `remove_to_learn(topic="X")`
+
+**Statuses**: `to-learn`, `in-progress`, `learned`
 
 ## Review Session Protocol
 
@@ -71,14 +94,40 @@ The MCP server works with a Claude Skill at `~/.claude/skills/learnbase/SKILL.md
 
 ## Key Files
 
+**Review Notes:**
 - `~/.learnbase/notes/` - Notes storage directory
 - `~/.learnbase/notes/README.md` - Auto-generated index
+- `~/.learnbase/history/` - Review session history
+
+**To-Learn Topics:**
+- `~/.learnbase/to_learn.md` - Single file for all learning topics
+- `~/.learnbase/to_learn_archived_*/` - Archived old topic files
+
+**Skills:**
 - `~/.claude/skills/learnbase/SKILL.md` - Review protocol for AI
 
 ## Development Guidelines
 
-- Notes are the source of truth (not database)
+**General:**
+- Markdown files are the source of truth (not database)
 - All dates use ISO 8601 format
+- Atomic file writes (temp file + rename) to prevent corruption
+
+**Review Notes:**
 - Filenames are lowercase with hyphens: `python-gil.md`
 - The Skill handles question generation; MCP tools only manage state
 - Question performance uses exponential moving average (70% new, 30% old)
+
+**To-Learn Topics:**
+- Single file with table (quick topics) and sections (detailed topics)
+- Topics can be quick-captured or detailed with notes
+- Archive section preserves learning history
+- Manual editing supported (Obsidian-friendly)
+
+## Complementary Workflow
+
+1. **Capture** → `add_to_learn` ("I want to learn about X")
+2. **Research** → `update_to_learn` (add notes as you learn)
+3. **Solidify** → `add_note` (create spaced repetition note)
+4. **Review** → `get_due_notes` + review session
+5. **Archive** → `remove_to_learn` (topic learned, now in notes system)
