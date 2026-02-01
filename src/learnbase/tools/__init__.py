@@ -11,6 +11,13 @@ from .to_learn import (
     handle_remove_to_learn,
     handle_update_to_learn
 )
+from .rag import (
+    handle_index_note,
+    handle_search_notes,
+    handle_remove_from_index,
+    handle_reindex_all_notes,
+    handle_get_index_stats
+)
 
 __all__ = [
     # Note CRUD operations
@@ -34,4 +41,10 @@ __all__ = [
     "handle_get_to_learn",
     "handle_remove_to_learn",
     "handle_update_to_learn",
+    # RAG operations
+    "handle_index_note",
+    "handle_search_notes",
+    "handle_remove_from_index",
+    "handle_reindex_all_notes",
+    "handle_get_index_stats",
 ]

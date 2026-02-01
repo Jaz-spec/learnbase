@@ -11,6 +11,7 @@ from mcp.types import Tool, TextContent
 
 from .core.note_manager import NoteManager
 from .core.to_learn_manager import ToLearnManager
+from .core.rag_manager import RAGManager
 from .tools import (
     handle_add_note,
     handle_get_note,
@@ -28,6 +29,11 @@ from .tools import (
     handle_get_to_learn,
     handle_remove_to_learn,
     handle_update_to_learn,
+    handle_index_note,
+    handle_search_notes,
+    handle_remove_from_index,
+    handle_reindex_all_notes,
+    handle_get_index_stats,
 )
 
 
@@ -57,7 +63,18 @@ def setup_logging():
 setup_logging()
 
 app = Server("learnbase")
+
+# Initialize managers with proper dependency injection
+# Step 1: Create note_manager without rag_manager
 note_manager = NoteManager()
+
+# Step 2: Create rag_manager with note_manager
+rag_manager = RAGManager(note_manager)
+
+# Step 3: Inject rag_manager back into note_manager for auto-indexing
+note_manager.rag_manager = rag_manager
+
+# Initialize to_learn_manager independently
 to_learn_manager = ToLearnManager()
 
 
@@ -440,6 +457,79 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["topic"]
             }
+        ),
+        # RAG / Semantic Search tools
+        Tool(
+            name="index_note",
+            description="Index a note in the vector database for semantic search",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "The note filename to index (e.g., 'python-gil.md')"
+                    }
+                },
+                "required": ["filename"]
+            }
+        ),
+        Tool(
+            name="search_notes",
+            description="Search notes using semantic similarity",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (natural language)"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Maximum number of results to return (default: 5)",
+                        "default": 5
+                    },
+                    "min_confidence": {
+                        "type": "number",
+                        "description": "Minimum confidence score for review notes (0.0-1.0)"
+                    },
+                    "note_type": {
+                        "type": "string",
+                        "enum": ["review", "reference", "evergreen"],
+                        "description": "Filter by note type"
+                    }
+                },
+                "required": ["query"]
+            }
+        ),
+        Tool(
+            name="remove_from_index",
+            description="Remove a note from the vector database index",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "The note filename to remove from index"
+                    }
+                },
+                "required": ["filename"]
+            }
+        ),
+        Tool(
+            name="reindex_all_notes",
+            description="Rebuild the entire vector database index from all notes",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+        Tool(
+            name="get_index_stats",
+            description="Get statistics about the vector database index",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
         )
     ]
 
@@ -471,16 +561,27 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         "get_to_learn": handle_get_to_learn,
         "remove_to_learn": handle_remove_to_learn,
         "update_to_learn": handle_update_to_learn,
+        # RAG operations
+        "index_note": handle_index_note,
+        "search_notes": handle_search_notes,
+        "remove_from_index": handle_remove_from_index,
+        "reindex_all_notes": handle_reindex_all_notes,
+        "get_index_stats": handle_get_index_stats,
     }
 
     # Dispatch to handler
     handler = handlers.get(name)
     if handler:
-        # Use to_learn_manager for to-learn tools, note_manager for others
+        # Use to_learn_manager for to-learn tools
         if name.startswith("add_to_learn") or name.startswith("list_to_learn") or \
            name.startswith("get_to_learn") or name.startswith("remove_to_learn") or \
            name.startswith("update_to_learn"):
             return handler(to_learn_manager, arguments)
+        # Use rag_manager for RAG tools
+        elif name in ("index_note", "search_notes", "remove_from_index",
+                      "reindex_all_notes", "get_index_stats"):
+            return handler(rag_manager, arguments)
+        # Use note_manager for everything else
         else:
             return handler(note_manager, arguments)
     else:

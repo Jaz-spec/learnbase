@@ -4,10 +4,11 @@ An MCP server that enables AI-driven spaced repetition review of markdown notes 
 
 ## Core Concept
 
-**Two complementary systems:**
+**Three complementary systems:**
 
 1. **Review Notes** (`~/.learnbase/notes/`): Markdown files with YAML frontmatter for spaced repetition learning
 2. **To-Learn Topics** (`~/.learnbase/to_learn.md`): Single markdown file for quick capture and tracking of topics to learn
+3. **Semantic Search** (`~/.learnbase/vector_db/`): ChromaDB vector database for finding notes by meaning, not just keywords
 
 ## Architecture
 
@@ -17,13 +18,15 @@ src/learnbase/
 │   ├── models.py           # Note dataclass with frontmatter serialization
 │   ├── note_manager.py     # File I/O for notes directory
 │   ├── to_learn_manager.py # Single-file manager for learning topics
+│   ├── rag_manager.py      # ChromaDB vector database manager
 │   └── spaced_rep.py       # SM-2 & scheduled review algorithms
 ├── tools/                  # MCP tool handlers
 │   ├── notes.py            # Note CRUD operations
 │   ├── review.py           # Review workflow
 │   ├── stats.py            # Statistics
 │   ├── performance.py      # Session tracking
-│   └── to_learn.py         # To-learn topic management
+│   ├── to_learn.py         # To-learn topic management
+│   └── rag.py              # Semantic search operations
 └── mcp_server.py           # MCP server registration
 ```
 
@@ -75,6 +78,22 @@ class Note:
 
 **Statuses**: `to-learn`, `in-progress`, `learned`
 
+### Semantic Search System
+
+**RAG Operations**: index_note, search_notes, remove_from_index, reindex_all_notes, get_index_stats
+
+**Workflow**:
+1. Index notes: `reindex_all_notes()` - Build vector database from all notes (review, reference, evergreen)
+2. Search: `search_notes(query="concurrency in Python")` - Natural language semantic search
+3. Get results with similarity scores, types, confidence, source counts
+4. Manual indexing: Only explicit calls to index (no auto-index on creation)
+
+**Technology**:
+- **Vector DB**: ChromaDB with persistent storage
+- **Embeddings**: sentence-transformers (all-MiniLM-L6-v2) by default, OpenAI optional
+- **Search**: Cosine similarity for semantic matching
+- **Metadata**: Flexible schema allows expansion without re-indexing
+
 ## Review Session Protocol
 
 The MCP server works with a Claude Skill at `~/.claude/skills/learnbase/SKILL.md`:
@@ -103,6 +122,11 @@ The MCP server works with a Claude Skill at `~/.claude/skills/learnbase/SKILL.md
 - `~/.learnbase/to_learn.md` - Single file for all learning topics
 - `~/.learnbase/to_learn_archived_*/` - Archived old topic files
 
+**Semantic Search:**
+- `~/.learnbase/vector_db/` - ChromaDB persistent storage
+- Indexed: All note types (review, reference, evergreen)
+- Embeddings: 384-dimensional vectors (all-MiniLM-L6-v2)
+
 **Skills:**
 - `~/.claude/skills/learnbase/SKILL.md` - Review protocol for AI
 
@@ -124,10 +148,19 @@ The MCP server works with a Claude Skill at `~/.claude/skills/learnbase/SKILL.md
 - Archive section preserves learning history
 - Manual editing supported (Obsidian-friendly)
 
+**Semantic Search:**
+- Manual indexing only (explicit user control)
+- Whole-note embedding (title + body as single document)
+- Metadata supports filtering by note type, confidence, source count
+- Local embeddings by default (no API keys required)
+- OpenAI embeddings optional (requires OPENAI_API_KEY env var)
+
 ## Complementary Workflow
 
 1. **Capture** → `add_to_learn` ("I want to learn about X")
 2. **Research** → `update_to_learn` (add notes as you learn)
 3. **Solidify** → `add_note` (create spaced repetition note)
-4. **Review** → `get_due_notes` + review session
-5. **Archive** → `remove_to_learn` (topic learned, now in notes system)
+4. **Index** → `index_note` or `reindex_all_notes` (build vector database)
+5. **Discover** → `search_notes` (find related notes semantically)
+6. **Review** → `get_due_notes` + review session
+7. **Archive** → `remove_to_learn` (topic learned, now in notes system)

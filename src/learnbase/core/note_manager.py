@@ -34,6 +34,9 @@ class NoteManager:
         self.history_dir = Path.home() / ".learnbase" / "history"
         self.history_dir.mkdir(parents=True, exist_ok=True)
 
+        # RAG manager will be injected after initialization
+        self.rag_manager = None
+
         # Initialize README if it doesn't exist
         if not self.readme_path.exists():
             self._create_readme()
@@ -148,6 +151,30 @@ class NoteManager:
 
         raise RuntimeError(f"Failed to create unique filename after 1000 attempts")
 
+    def _auto_index_note(self, filename: str, operation: str = "index") -> None:
+        """
+        Automatically index/remove note after CRUD operation.
+
+        Args:
+            filename: Note filename
+            operation: 'index' or 'remove'
+
+        Fails gracefully - logs warning but doesn't raise exceptions.
+        """
+        if not self.rag_manager or not self.rag_manager.is_available():
+            return  # RAG not available, skip silently
+
+        try:
+            if operation == "index":
+                self.rag_manager.index_note(filename)
+                logger.debug(f"Auto-indexed: {filename}")
+            elif operation == "remove":
+                self.rag_manager.remove_from_index(filename)
+                logger.debug(f"Auto-removed from index: {filename}")
+        except Exception as e:
+            logger.warning(f"Auto-indexing failed for {filename}: {e}")
+            # Don't raise - allow CRUD operation to succeed
+
     def create_note(
         self,
         title: str,
@@ -259,6 +286,9 @@ class NoteManager:
 
         # Write to file
         self._save_note(note, filepath)
+
+        # Auto-index the note
+        self._auto_index_note(filename, operation="index")
 
         # Update README
         self.update_readme_index()
@@ -491,6 +521,9 @@ class NoteManager:
         filepath = self.notes_dir / filename
         self._save_note(note, filepath)
 
+        # Auto-index the updated note
+        self._auto_index_note(filename, operation="index")
+
         # Update README
         self.update_readme_index()
 
@@ -528,6 +561,9 @@ class NoteManager:
         filepath = self.notes_dir / filename
         self._save_note(note, filepath)
 
+        # Auto-index the updated note
+        self._auto_index_note(filename, operation="index")
+
         # Update README
         self.update_readme_index()
 
@@ -551,6 +587,9 @@ class NoteManager:
             return False
 
         filepath.unlink()
+
+        # Auto-remove from index
+        self._auto_index_note(filename, operation="remove")
 
         # Update README
         self.update_readme_index()
@@ -808,6 +847,9 @@ class NoteManager:
         filepath = self.notes_dir / filename
         self._save_note(note, filepath)
 
+        # Auto-index the updated note
+        self._auto_index_note(filename, operation="index")
+
         logger.debug(f"Bulk updated {len(question_scores)} question performances for {filename}")
 
     def update_priority_requests(
@@ -886,6 +928,10 @@ class NoteManager:
         # Save updated note
         filepath = self.notes_dir / filename
         self._save_note(note, filepath)
+
+        # Auto-index the updated note
+        self._auto_index_note(filename, operation="index")
+
         logger.info(f"Updated priorities for {filename}: {len(new_requests)} new, {len(addressed_topics)} addressed")
 
     def _create_readme(self):
