@@ -81,8 +81,8 @@ async def list_tools() -> list[Tool]:
                     },
                     "note_type": {
                         "type": "string",
-                        "enum": ["review", "reference"],
-                        "description": "Type of note: 'review' for spaced repetition learning, 'reference' for storage only. Default: 'review'",
+                        "enum": ["review", "reference", "evergreen"],
+                        "description": "Type of note: 'review' for spaced repetition learning, 'reference' for storage only, 'evergreen' for manual curation (LLM read-only). Default: 'review'",
                         "default": "review"
                     },
                     "review_mode": {
@@ -179,6 +179,11 @@ async def list_tools() -> list[Tool]:
                     "exclude_unverified": {
                         "type": "boolean",
                         "description": "Exclude notes without sources from results"
+                    },
+                    "note_type": {
+                        "type": "string",
+                        "enum": ["review", "reference", "evergreen"],
+                        "description": "Filter by note type: 'review', 'reference', or 'evergreen'"
                     }
                 }
             }

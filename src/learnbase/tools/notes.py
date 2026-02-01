@@ -5,7 +5,7 @@ from typing import Any, Literal
 from mcp.types import TextContent
 
 from ..core.note_manager import NoteManager
-from ..core.models import Note, ReviewNote, ReferenceNote
+from ..core.models import Note, ReviewNote, ReferenceNote, EvergreenNote
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,11 @@ def handle_add_note(note_manager: NoteManager, arguments: Any) -> list[TextConte
                 type="text",
                 text=f"✓ Created reference note: {filename}\nTitle: {title}\nType: Reference (storage only)"
             )]
+        elif note_type == 'evergreen':
+            return [TextContent(
+                type="text",
+                text=f"✓ Created evergreen note: {filename}\nTitle: {title}\nType: Evergreen (manually curated - LLM read-only)"
+            )]
         else:
             return [TextContent(
                 type="text",
@@ -102,6 +107,12 @@ def handle_get_note(note_manager: NoteManager, arguments: Any) -> list[TextConte
     # Format differently based on note type
     if isinstance(note, ReviewNote):
         result = note.format_full()
+    elif isinstance(note, EvergreenNote):
+        result = f"# {note.title}\n\n"
+        result += f"**File**: {note.filename}\n"
+        result += f"**Type**: Evergreen (manually curated)\n\n"
+        result += "---\n\n"
+        result += note.body
     else:  # ReferenceNote
         result = f"# {note.title}\n\n"
         result += f"**File**: {note.filename}\n"
@@ -119,6 +130,7 @@ def handle_list_notes(note_manager: NoteManager, arguments: Any) -> list[TextCon
     needs_verification = arguments.get("needs_verification", False)
     low_confidence_threshold = arguments.get("low_confidence_threshold")
     exclude_unverified = arguments.get("exclude_unverified", False)
+    note_type = arguments.get("note_type")
 
     # Determine which notes to fetch
     if needs_verification:
@@ -133,6 +145,11 @@ def handle_list_notes(note_manager: NoteManager, arguments: Any) -> list[TextCon
     elif due_only:
         notes = note_manager.get_due_notes(limit=limit)
         header = "Notes due for review"
+    elif note_type:
+        notes = note_manager.get_all_notes_by_type(note_type=note_type)
+        if limit:
+            notes = notes[:limit]
+        header = f"{note_type.capitalize()} notes"
     else:
         notes = note_manager.get_all_notes()
         if limit:
@@ -179,6 +196,10 @@ def handle_list_notes(note_manager: NoteManager, arguments: Any) -> list[TextCon
             if note.confidence_score is not None:
                 result += f", **Confidence**: {note.confidence_score:.2f}"
             result += f", **Sources**: {len(note.sources)}\n\n"
+        elif isinstance(note, EvergreenNote):
+            result += f"### {note.title}\n"
+            result += f"- **File**: {note.filename}\n"
+            result += f"- **Type**: Evergreen (manually curated)\n\n"
         else:  # ReferenceNote
             result += f"### {note.title}\n"
             result += f"- **File**: {note.filename}\n"

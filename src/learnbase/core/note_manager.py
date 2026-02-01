@@ -7,7 +7,7 @@ import re
 import logging
 import json
 
-from .models import Note, ReviewNote, ReferenceNote
+from .models import Note, ReviewNote, ReferenceNote, EvergreenNote
 from .spaced_rep import calculate_next_review, calculate_scheduled_review
 
 logger = logging.getLogger(__name__)
@@ -152,7 +152,7 @@ class NoteManager:
         self,
         title: str,
         body: str,
-        note_type: Literal['review', 'reference'] = 'review',
+        note_type: Literal['review', 'reference', 'evergreen'] = 'review',
         review_mode: Optional[Literal['spaced', 'scheduled']] = None,
         schedule_pattern: Optional[str] = None
     ) -> str:
@@ -180,8 +180,8 @@ class NoteManager:
             raise ValueError("Body cannot be empty")
 
         # Validate note_type
-        if note_type not in ('review', 'reference'):
-            raise ValueError(f"Invalid note_type: '{note_type}'. Must be 'review' or 'reference'")
+        if note_type not in ('review', 'reference', 'evergreen'):
+            raise ValueError(f"Invalid note_type: '{note_type}'. Must be 'review', 'reference', or 'evergreen'")
 
         # For ReviewNote, review_mode is required
         if note_type == 'review':
@@ -201,10 +201,10 @@ class NoteManager:
                 except Exception as e:
                     raise ValueError(f"Invalid schedule pattern '{schedule_pattern}': {e}")
 
-        # For ReferenceNote, review parameters are not applicable
-        if note_type == 'reference':
+        # For ReferenceNote and EvergreenNote, review parameters are not applicable
+        if note_type in ('reference', 'evergreen'):
             if review_mode is not None or schedule_pattern is not None:
-                logger.warning("review_mode and schedule_pattern are ignored for reference notes")
+                logger.warning("review_mode and schedule_pattern are ignored for reference and evergreen notes")
 
         logger.debug(f"Creating note: title='{title[:50]}...', note_type={note_type}, review_mode={review_mode}")
         filename = Note.create_filename(title)
@@ -233,6 +233,14 @@ class NoteManager:
                 created_at=now  # Initialize with current time
             )
             logger.info(f"Created reference note: {filename}")
+        elif note_type == 'evergreen':
+            note = EvergreenNote(
+                filename=filename,
+                title=title,
+                body=body,
+                created_at=now  # Initialize with current time
+            )
+            logger.info(f"Created evergreen note: {filename}")
         else:  # note_type == 'review'
             note = ReviewNote(
                 filename=filename,
@@ -289,12 +297,14 @@ class NoteManager:
             return None
 
     def _sort_notes_by_review_date(self, notes: List[Note]) -> List[Note]:
-        """Sort notes: ReviewNotes first by next_review, then ReferenceNotes by title."""
+        """Sort notes: ReviewNotes first by next_review, then ReferenceNotes and EvergreenNotes by title."""
         review_notes = [n for n in notes if isinstance(n, ReviewNote)]
         reference_notes = [n for n in notes if isinstance(n, ReferenceNote)]
+        evergreen_notes = [n for n in notes if isinstance(n, EvergreenNote)]
         review_notes.sort(key=lambda n: n.next_review)
         reference_notes.sort(key=lambda n: n.title)
-        return review_notes + reference_notes
+        evergreen_notes.sort(key=lambda n: n.title)
+        return review_notes + reference_notes + evergreen_notes
 
     def get_all_notes(self) -> List[Note]:
         """
@@ -550,13 +560,13 @@ class NoteManager:
 
     def get_all_notes_by_type(
         self,
-        note_type: Optional[Literal['review', 'reference']] = None
+        note_type: Optional[Literal['review', 'reference', 'evergreen']] = None
     ) -> List[Note]:
         """
         Get all notes, optionally filtered by type.
 
         Args:
-            note_type: Filter by 'review' or 'reference', or None for all notes
+            note_type: Filter by 'review', 'reference', or 'evergreen', or None for all notes
 
         Returns:
             List of Note instances
@@ -566,6 +576,8 @@ class NoteManager:
             return [n for n in notes if isinstance(n, ReviewNote)]
         elif note_type == 'reference':
             return [n for n in notes if isinstance(n, ReferenceNote)]
+        elif note_type == 'evergreen':
+            return [n for n in notes if isinstance(n, EvergreenNote)]
         return notes
 
     def get_stats(self) -> Dict[str, Any]:
@@ -578,6 +590,7 @@ class NoteManager:
         all_notes = self.get_all_notes()
         review_notes = [n for n in all_notes if isinstance(n, ReviewNote)]
         reference_notes = [n for n in all_notes if isinstance(n, ReferenceNote)]
+        evergreen_notes = [n for n in all_notes if isinstance(n, EvergreenNote)]
 
         now = datetime.now()
         today_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -602,6 +615,7 @@ class NoteManager:
             "total_notes": len(all_notes),
             "review_notes": len(review_notes),
             "reference_notes": len(reference_notes),
+            "evergreen_notes": len(evergreen_notes),
             "reviewed_today": len(reviewed_today),
             "due_today": len(due_today),
             "due_this_week": len(due_week),
@@ -625,6 +639,7 @@ class NoteManager:
             f"- Total notes: {stats['total_notes']}",
             f"- Review notes: {stats['review_notes']}",
             f"- Reference notes: {stats['reference_notes']}",
+            f"- Evergreen notes: {stats['evergreen_notes']}",
             f"- Due today: {stats['due_today']}",
             f"- Reviewed today: {stats['reviewed_today']}",
             f"- Spaced repetition: {stats['spaced_notes']} notes",
@@ -644,6 +659,10 @@ class NoteManager:
                 lines.append(
                     f"| {note.filename} | {note.title[:40]} | review | {note.review_mode} | "
                     f"{next_review_str} | {note.review_count} | {note.ease_factor:.2f} |"
+                )
+            elif isinstance(note, EvergreenNote):
+                lines.append(
+                    f"| {note.filename} | {note.title[:40]} | evergreen | - | - | - | - |"
                 )
             else:  # ReferenceNote
                 lines.append(

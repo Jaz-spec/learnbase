@@ -64,6 +64,18 @@ class Note:
                 confidence_score=parse_optional_float(post.get('confidence_score')),
                 sources=cast(List[Dict[str, str]], parse_list(post.get('sources')))
             )
+        elif note_type == 'evergreen':
+            now = datetime.now()
+            created_at = parse_datetime(post.get('created'), now)
+
+            return EvergreenNote(
+                filename=filepath.name,
+                title=str(post.get('title', filepath.stem.replace('-', ' ').title())),
+                body=str(post.content),
+                created_at=created_at,
+                confidence_score=parse_optional_float(post.get('confidence_score')),
+                sources=cast(List[Dict[str, str]], parse_list(post.get('sources')))
+            )
         else:
 
             now = datetime.now()
@@ -134,6 +146,48 @@ class ReferenceNote(Note):
     type: str = "reference"
 
     # Metadata fields (same as ReviewNote for consistency)
+    created_at: datetime = field(default_factory=datetime.now)
+    confidence_score: Optional[float] = None
+    sources: List[Dict[str, str]] = field(default_factory=list)
+    # Structure: [{"url": str, "title": str (optional), "accessed_date": str (optional), "note": str (optional)}]
+
+    def _get_metadata(self) -> dict:
+        return {
+            'title': self.title,
+            'type': self.type,
+            'created': self.created_at.isoformat(),
+            'confidence_score': self.confidence_score,
+            'sources': self.sources
+        }
+
+    def set_confidence_score(self, score: float):
+        """
+        Set confidence score with validation.
+
+        Args:
+            score: Confidence score (0.0-1.0)
+
+        Raises:
+            ValueError: If score is invalid
+        """
+        if not isinstance(score, (int, float)):
+            raise ValueError(f"Confidence score must be numeric, got {type(score).__name__}")
+        if not 0.0 <= score <= 1.0:
+            raise ValueError(f"Confidence score must be between 0.0 and 1.0, got {score}")
+
+        self.confidence_score = score
+
+
+# ================================================================
+# EVERGREEN - Child class
+# ================================================================
+@dataclass
+class EvergreenNote(Note):
+    """Evergreen note - manually curated by user; LLMs can read but not edit"""
+
+    type: str = "evergreen"
+
+    # Metadata fields (same as ReferenceNote for consistency)
     created_at: datetime = field(default_factory=datetime.now)
     confidence_score: Optional[float] = None
     sources: List[Dict[str, str]] = field(default_factory=list)
