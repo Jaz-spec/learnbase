@@ -4,12 +4,12 @@ import pytest
 from pathlib import Path
 from datetime import datetime
 from tempfile import TemporaryDirectory
-from src.learnbase.core.models import Note
+from src.learnbase.core.models import Note, ReviewNote
 
 
 def test_priority_requests_field_defaults():
     """Test that priority_requests field has empty list default."""
-    note = Note(
+    note = ReviewNote(
         filename="test.md",
         title="Test Note",
         body="Test content",
@@ -28,7 +28,7 @@ def test_priority_requests_field_defaults():
 
 def test_priority_requests_serialization():
     """Test that priority_requests are properly serialized to markdown."""
-    note = Note(
+    note = ReviewNote(
         filename="test.md",
         title="Test Note",
         body="Test content",
@@ -102,7 +102,7 @@ def test_priority_requests_roundtrip():
         test_file = Path(tmpdir) / "test.md"
 
         # Create a note with priority_requests
-        note1 = Note(
+        note1 = ReviewNote(
             filename="test.md",
             title="Test Note",
             body="Test content",

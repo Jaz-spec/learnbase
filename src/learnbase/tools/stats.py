@@ -16,6 +16,8 @@ def handle_get_stats(note_manager: NoteManager, arguments: Any) -> list[TextCont
 
     result = "# LearnBase Statistics\n\n"
     result += f"- **Total notes**: {stats['total_notes']}\n"
+    result += f"- **Review notes**: {stats['review_notes']}\n"
+    result += f"- **Reference notes**: {stats['reference_notes']}\n"
     result += f"- **Reviewed today**: {stats['reviewed_today']}\n"
     result += f"- **Due today**: {stats['due_today']}\n"
     result += f"- **Due this week**: {stats['due_this_week']}\n"

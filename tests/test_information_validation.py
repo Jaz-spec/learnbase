@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 from datetime import datetime
 from tempfile import TemporaryDirectory
-from src.learnbase.core.models import Note
+from src.learnbase.core.models import Note, ReviewNote
 from src.learnbase.core.note_manager import NoteManager
 
 
@@ -14,7 +14,7 @@ from src.learnbase.core.note_manager import NoteManager
 
 def test_confidence_score_field_defaults():
     """Test that confidence_score field defaults to None."""
-    note = Note(
+    note = ReviewNote(
         filename="test.md",
         title="Test Note",
         body="Test content",
@@ -33,7 +33,7 @@ def test_confidence_score_field_defaults():
 
 def test_sources_field_defaults():
     """Test that sources field defaults to empty list."""
-    note = Note(
+    note = ReviewNote(
         filename="test.md",
         title="Test Note",
         body="Test content",
@@ -52,7 +52,7 @@ def test_sources_field_defaults():
 
 def test_set_confidence_score_valid():
     """Test setting valid confidence scores."""
-    note = Note(
+    note = ReviewNote(
         filename="test.md",
         title="Test Note",
         body="Test content",
@@ -79,7 +79,7 @@ def test_set_confidence_score_valid():
 
 def test_set_confidence_score_invalid_range():
     """Test that invalid confidence scores raise ValueError."""
-    note = Note(
+    note = ReviewNote(
         filename="test.md",
         title="Test Note",
         body="Test content",
@@ -102,7 +102,7 @@ def test_set_confidence_score_invalid_range():
 
 def test_set_confidence_score_invalid_type():
     """Test that non-numeric confidence scores raise ValueError."""
-    note = Note(
+    note = ReviewNote(
         filename="test.md",
         title="Test Note",
         body="Test content",
@@ -122,7 +122,7 @@ def test_set_confidence_score_invalid_type():
 
 def test_confidence_score_serialization():
     """Test that confidence_score is properly serialized to markdown."""
-    note = Note(
+    note = ReviewNote(
         filename="test.md",
         title="Test Note",
         body="Test content",
@@ -144,7 +144,7 @@ def test_confidence_score_serialization():
 
 def test_sources_serialization():
     """Test that sources are properly serialized to markdown."""
-    note = Note(
+    note = ReviewNote(
         filename="test.md",
         title="Test Note",
         body="Test content",
@@ -251,7 +251,7 @@ def test_roundtrip_with_confidence_and_sources():
     with TemporaryDirectory() as tmpdir:
         test_file = Path(tmpdir) / "test.md"
 
-        note1 = Note(
+        note1 = ReviewNote(
             filename="test.md",
             title="Test Note",
             body="Test content",
@@ -536,5 +536,5 @@ def test_get_due_notes_with_indicators():
         result = handle_get_due_notes(nm, {})
         text = result[0].text
 
-        # Check for indicators
-        assert "⚠️" in text or "no sources" in text.lower()
+        # Check for indicators (verification status is shown)
+        assert "Un-verified" in text or "Unverified" in text

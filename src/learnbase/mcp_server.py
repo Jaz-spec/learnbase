@@ -67,7 +67,7 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="add_note",
-            description="Add a new learning note to LearnBase",
+            description="Add a new learning note to LearnBase. Can create review notes (spaced repetition) or reference notes (storage only).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -79,15 +79,20 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "description": "Markdown content of the note"
                     },
+                    "note_type": {
+                        "type": "string",
+                        "enum": ["review", "reference"],
+                        "description": "Type of note: 'review' for spaced repetition learning, 'reference' for storage only. Default: 'review'",
+                        "default": "review"
+                    },
                     "review_mode": {
                         "type": "string",
                         "enum": ["spaced", "scheduled"],
-                        "description": "Review mode: 'spaced' for SM-2 algorithm, 'scheduled' for fixed intervals",
-                        "default": "spaced"
+                        "description": "Review mode (only for review notes): 'spaced' for SM-2 algorithm, 'scheduled' for fixed intervals. Default: 'spaced'"
                     },
                     "schedule_pattern": {
                         "type": "string",
-                        "description": "Schedule pattern for scheduled mode (e.g., '1d,1w,2w,1m')"
+                        "description": "Schedule pattern (only for scheduled review mode, e.g., '1d,1w,2w,1m')"
                     }
                 },
                 "required": ["title", "body"]

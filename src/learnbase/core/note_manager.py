@@ -7,7 +7,7 @@ import re
 import logging
 import json
 
-from .models import Note
+from .models import Note, ReviewNote, ReferenceNote
 from .spaced_rep import calculate_next_review, calculate_scheduled_review
 
 logger = logging.getLogger(__name__)
@@ -152,7 +152,8 @@ class NoteManager:
         self,
         title: str,
         body: str,
-        review_mode: Literal['spaced', 'scheduled'] = 'spaced',
+        note_type: Literal['review', 'reference'] = 'review',
+        review_mode: Optional[Literal['spaced', 'scheduled']] = None,
         schedule_pattern: Optional[str] = None
     ) -> str:
         """
@@ -161,7 +162,8 @@ class NoteManager:
         Args:
             title: Note title
             body: Markdown content
-            review_mode: 'spaced' or 'scheduled'
+            note_type: 'review' for spaced repetition learning, 'reference' for storage only
+            review_mode: 'spaced' or 'scheduled' (only for review notes)
             schedule_pattern: Schedule pattern if using scheduled mode
 
         Returns:
@@ -177,24 +179,34 @@ class NoteManager:
         if not body or not body.strip():
             raise ValueError("Body cannot be empty")
 
-        # Validate review_mode
-        if review_mode not in ('spaced', 'scheduled'):
-            raise ValueError(f"Invalid review_mode: '{review_mode}'. Must be 'spaced' or 'scheduled'")
+        # Validate note_type
+        if note_type not in ('review', 'reference'):
+            raise ValueError(f"Invalid note_type: '{note_type}'. Must be 'review' or 'reference'")
 
-        # Validate schedule_pattern for scheduled mode
-        if review_mode == 'scheduled':
-            if not schedule_pattern:
+        # For ReviewNote, review_mode is required
+        if note_type == 'review':
+            if review_mode is None:
+                review_mode = 'spaced'  # Default
+            if review_mode not in ('spaced', 'scheduled'):
+                raise ValueError(f"Invalid review_mode: '{review_mode}'. Must be 'spaced' or 'scheduled'")
+            if review_mode == 'scheduled' and not schedule_pattern:
                 raise ValueError("Schedule pattern required for scheduled mode")
             # Test parsing
-            try:
-                from .spaced_rep import parse_schedule_pattern
-                intervals = parse_schedule_pattern(schedule_pattern)
-                if not intervals:
-                    raise ValueError("Schedule pattern must produce at least one interval")
-            except Exception as e:
-                raise ValueError(f"Invalid schedule pattern '{schedule_pattern}': {e}")
+            if review_mode == 'scheduled':
+                try:
+                    from .spaced_rep import parse_schedule_pattern
+                    intervals = parse_schedule_pattern(schedule_pattern)
+                    if not intervals:
+                        raise ValueError("Schedule pattern must produce at least one interval")
+                except Exception as e:
+                    raise ValueError(f"Invalid schedule pattern '{schedule_pattern}': {e}")
 
-        logger.debug(f"Creating note: title='{title[:50]}...', review_mode={review_mode}")
+        # For ReferenceNote, review parameters are not applicable
+        if note_type == 'reference':
+            if review_mode is not None or schedule_pattern is not None:
+                logger.warning("review_mode and schedule_pattern are ignored for reference notes")
+
+        logger.debug(f"Creating note: title='{title[:50]}...', note_type={note_type}, review_mode={review_mode}")
         filename = Note.create_filename(title)
         filepath = self.notes_dir / filename
 
@@ -213,19 +225,29 @@ class NoteManager:
 
         now = datetime.now()
 
-        note = Note(
-            filename=filename,
-            title=title,
-            body=body,
-            review_mode=review_mode,
-            schedule_pattern=schedule_pattern,
-            created_at=now,
-            last_reviewed=None,
-            next_review=now,  # Due immediately for first review
-            interval_days=1,
-            ease_factor=2.5,
-            review_count=0
-        )
+        if note_type == 'reference':
+            note = ReferenceNote(
+                filename=filename,
+                title=title,
+                body=body,
+                created_at=now  # Initialize with current time
+            )
+            logger.info(f"Created reference note: {filename}")
+        else:  # note_type == 'review'
+            note = ReviewNote(
+                filename=filename,
+                title=title,
+                body=body,
+                review_mode=review_mode,
+                schedule_pattern=schedule_pattern,
+                created_at=now,
+                last_reviewed=None,
+                next_review=now,  # Due immediately for first review
+                interval_days=1,
+                ease_factor=2.5,
+                review_count=0
+            )
+            logger.info(f"Created review note: {filename} (mode={review_mode})")
 
         # Write to file
         self._save_note(note, filepath)
@@ -233,7 +255,6 @@ class NoteManager:
         # Update README
         self.update_readme_index()
 
-        logger.info(f"Created note: {filename}")
         return filename
 
     def get_note(self, filename: str) -> Optional[Note]:
@@ -267,6 +288,14 @@ class NoteManager:
             logger.critical(f"Unexpected error loading note {filename}: {e}", exc_info=True)
             return None
 
+    def _sort_notes_by_review_date(self, notes: List[Note]) -> List[Note]:
+        """Sort notes: ReviewNotes first by next_review, then ReferenceNotes by title."""
+        review_notes = [n for n in notes if isinstance(n, ReviewNote)]
+        reference_notes = [n for n in notes if isinstance(n, ReferenceNote)]
+        review_notes.sort(key=lambda n: n.next_review)
+        reference_notes.sort(key=lambda n: n.title)
+        return review_notes + reference_notes
+
     def get_all_notes(self) -> List[Note]:
         """
         Get all notes.
@@ -294,8 +323,8 @@ class NoteManager:
                 logger.critical(f"Unexpected error loading note {filepath.name}: {e}", exc_info=True)
                 continue
 
-        # Sort by next_review date
-        notes.sort(key=lambda n: n.next_review)
+        # Sort by next_review date using type-safe sorting
+        notes = self._sort_notes_by_review_date(notes)
 
         return notes
 
@@ -304,7 +333,7 @@ class NoteManager:
         limit: Optional[int] = None,
         review_mode: Optional[Literal['spaced', 'scheduled']] = None,
         require_verified: bool = False
-    ) -> List[Note]:
+    ) -> List[ReviewNote]:
         """
         Get notes that are due for review.
 
@@ -314,9 +343,9 @@ class NoteManager:
             require_verified: Only include verified notes (with sources and confidence >= 0.6)
 
         Returns:
-            List of Note instances due for review
+            List of ReviewNote instances due for review
         """
-        all_notes = self.get_all_notes()
+        all_notes = [n for n in self.get_all_notes() if isinstance(n, ReviewNote)]
         now = datetime.now()
 
         # Filter due notes
@@ -339,7 +368,7 @@ class NoteManager:
 
         return due_notes
 
-    def get_notes_needing_verification(self, limit: Optional[int] = None) -> List[Note]:
+    def get_notes_needing_verification(self, limit: Optional[int] = None) -> List[ReviewNote]:
         """
         Get notes that need verification (have no sources).
 
@@ -347,9 +376,9 @@ class NoteManager:
             limit: Maximum number of notes to return
 
         Returns:
-            List of Note instances with empty sources, sorted by next_review date
+            List of ReviewNote instances with empty sources, sorted by next_review date
         """
-        all_notes = self.get_all_notes()
+        all_notes = [n for n in self.get_all_notes() if isinstance(n, ReviewNote)]
 
         # Filter notes with no sources
         unverified_notes = [n for n in all_notes if not n.sources]
@@ -366,7 +395,7 @@ class NoteManager:
         self,
         threshold: float = 0.6,
         limit: Optional[int] = None
-    ) -> List[Note]:
+    ) -> List[ReviewNote]:
         """
         Get notes with confidence score below threshold.
 
@@ -375,14 +404,14 @@ class NoteManager:
             limit: Maximum number of notes to return
 
         Returns:
-            List of Note instances with low confidence, sorted by confidence_score (lowest first)
+            List of ReviewNote instances with low confidence, sorted by confidence_score (lowest first)
         """
         if not isinstance(threshold, (int, float)):
             raise ValueError(f"Threshold must be numeric, got {type(threshold).__name__}")
         if not 0.0 <= threshold <= 1.0:
             raise ValueError(f"Threshold must be between 0.0 and 1.0, got {threshold}")
 
-        all_notes = self.get_all_notes()
+        all_notes = [n for n in self.get_all_notes() if isinstance(n, ReviewNote)]
 
         # Filter notes with confidence score below threshold
         # Exclude notes with None confidence_score
@@ -419,6 +448,11 @@ class NoteManager:
         logger.debug(f"Updating review: {filename}, rating={rating}")
 
         note = self._get_note_or_raise(filename)
+        if not isinstance(note, ReviewNote):
+            raise ValueError(
+                f"Note '{filename}' is a reference note and cannot be reviewed. "
+                f"Reference notes are for storage only and do not use spaced repetition."
+            )
 
         # Calculate next review based on mode
         if note.review_mode == 'spaced':
@@ -514,6 +548,26 @@ class NoteManager:
         logger.info(f"Deleted note: {filename}")
         return True
 
+    def get_all_notes_by_type(
+        self,
+        note_type: Optional[Literal['review', 'reference']] = None
+    ) -> List[Note]:
+        """
+        Get all notes, optionally filtered by type.
+
+        Args:
+            note_type: Filter by 'review' or 'reference', or None for all notes
+
+        Returns:
+            List of Note instances
+        """
+        notes = self.get_all_notes()
+        if note_type == 'review':
+            return [n for n in notes if isinstance(n, ReviewNote)]
+        elif note_type == 'reference':
+            return [n for n in notes if isinstance(n, ReferenceNote)]
+        return notes
+
     def get_stats(self) -> Dict[str, Any]:
         """
         Get learning statistics.
@@ -522,33 +576,38 @@ class NoteManager:
             Dictionary with statistics
         """
         all_notes = self.get_all_notes()
+        review_notes = [n for n in all_notes if isinstance(n, ReviewNote)]
+        reference_notes = [n for n in all_notes if isinstance(n, ReferenceNote)]
+
         now = datetime.now()
         today_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
         week_end = now + timedelta(days=7)
 
-        # Count due notes
-        due_today = [n for n in all_notes if n.next_review <= today_end]
-        due_week = [n for n in all_notes if today_end < n.next_review <= week_end]
+        # Count due notes (only ReviewNotes can be due)
+        due_today = [n for n in review_notes if n.next_review <= today_end]
+        due_week = [n for n in review_notes if today_end < n.next_review <= week_end]
 
         # Count reviewed today (using date comparison)
         today_date = now.date()
         reviewed_today = [
-            n for n in all_notes
+            n for n in review_notes
             if n.last_reviewed and n.last_reviewed.date() == today_date
         ]
 
         # Average ease factor
-        reviewed_notes = [n for n in all_notes if n.review_count > 0]
-        avg_ease = sum(n.ease_factor for n in reviewed_notes) / len(reviewed_notes) if reviewed_notes else 2.5
+        reviewed_notes_with_reviews = [n for n in review_notes if n.review_count > 0]
+        avg_ease = sum(n.ease_factor for n in reviewed_notes_with_reviews) / len(reviewed_notes_with_reviews) if reviewed_notes_with_reviews else 2.5
 
         return {
             "total_notes": len(all_notes),
+            "review_notes": len(review_notes),
+            "reference_notes": len(reference_notes),
             "reviewed_today": len(reviewed_today),
             "due_today": len(due_today),
             "due_this_week": len(due_week),
             "average_ease": avg_ease,
-            "spaced_notes": len([n for n in all_notes if n.review_mode == 'spaced']),
-            "scheduled_notes": len([n for n in all_notes if n.review_mode == 'scheduled'])
+            "spaced_notes": len([n for n in review_notes if n.review_mode == 'spaced']),
+            "scheduled_notes": len([n for n in review_notes if n.review_mode == 'scheduled'])
         }
 
     def update_readme_index(self):
@@ -564,6 +623,8 @@ class NoteManager:
             "",
             "## Statistics",
             f"- Total notes: {stats['total_notes']}",
+            f"- Review notes: {stats['review_notes']}",
+            f"- Reference notes: {stats['reference_notes']}",
             f"- Due today: {stats['due_today']}",
             f"- Reviewed today: {stats['reviewed_today']}",
             f"- Spaced repetition: {stats['spaced_notes']} notes",
@@ -572,22 +633,28 @@ class NoteManager:
             "",
             "## Notes Registry",
             "",
-            "| File | Title | Mode | Next Review | Reviews | Ease |",
-            "|------|-------|------|-------------|---------|------|"
+            "| File | Title | Type | Mode | Next Review | Reviews | Ease |",
+            "|------|-------|------|------|-------------|---------|------|"
         ]
 
         # Add notes to table
         for note in notes:
-            next_review_str = note.next_review.strftime('%Y-%m-%d')
-            lines.append(
-                f"| {note.filename} | {note.title[:40]} | {note.review_mode} | "
-                f"{next_review_str} | {note.review_count} | {note.ease_factor:.2f} |"
-            )
+            if isinstance(note, ReviewNote):
+                next_review_str = note.next_review.strftime('%Y-%m-%d')
+                lines.append(
+                    f"| {note.filename} | {note.title[:40]} | review | {note.review_mode} | "
+                    f"{next_review_str} | {note.review_count} | {note.ease_factor:.2f} |"
+                )
+            else:  # ReferenceNote
+                lines.append(
+                    f"| {note.filename} | {note.title[:40]} | reference | - | - | - | - |"
+                )
 
         lines.extend(["", "## Recent Updates", ""])
 
-        # Add recent updates (last 10 reviewed notes)
-        reviewed_notes = [n for n in notes if n.last_reviewed]
+        # Add recent updates (last 10 reviewed notes - only ReviewNotes have last_reviewed)
+        review_notes = [n for n in notes if isinstance(n, ReviewNote)]
+        reviewed_notes = [n for n in review_notes if n.last_reviewed]
         reviewed_notes.sort(key=lambda n: n.last_reviewed, reverse=True)
 
         for note in reviewed_notes[:10]:
@@ -708,6 +775,11 @@ class NoteManager:
         logger.debug(f"Bulk updating {len(question_scores)} question performances for {filename}")
 
         note = self._get_note_or_raise(filename)
+        if not isinstance(note, ReviewNote):
+            raise ValueError(
+                f"Note '{filename}' is a reference note and does not track question performance. "
+                f"Reference notes are for storage only and do not use spaced repetition."
+            )
 
         # Apply EMA algorithm to all questions
         for question_hash, score in question_scores:
@@ -737,6 +809,11 @@ class NoteManager:
         """
         self._validate_filename(filename)
         note = self._get_note_or_raise(filename)
+        if not isinstance(note, ReviewNote):
+            raise ValueError(
+                f"Note '{filename}' is a reference note and does not track priority requests. "
+                f"Reference notes are for storage only and do not use spaced repetition."
+            )
 
         ADDRESSED_THRESHOLD = 2
 

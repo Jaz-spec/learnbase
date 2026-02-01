@@ -6,12 +6,12 @@ from typing import Any
 from mcp.types import TextContent
 
 from ..core.note_manager import NoteManager
-from ..core.models import Note
+from ..core.models import Note, ReviewNote
 
 logger = logging.getLogger(__name__)
 
 
-def _get_verification_status_indicator(note: Note) -> str:
+def _get_verification_status_indicator(note: ReviewNote) -> str:
     """
     Get verification status indicator for a note.
 
@@ -96,6 +96,13 @@ def handle_review_note(note_manager: NoteManager, arguments: Any) -> list[TextCo
             text=f"Error: Note {filename} not found"
         )]
 
+    if not isinstance(note, ReviewNote):
+        return [TextContent(
+            type="text",
+            text=f"Error: Note '{filename}' is a reference note and cannot be reviewed. "
+                 f"Reference notes are for storage only and do not use spaced repetition."
+        )]
+
     # Build response with note content
     result = f"# {note.title}\n\n"
     result += f"**File**: {note.filename}\n"
@@ -128,6 +135,13 @@ def handle_record_review(note_manager: NoteManager, arguments: Any) -> list[Text
     try:
         note_manager.update_note_review(filename, rating)
         updated_note = note_manager.get_note(filename)
+
+        # Type check after retrieval (should always be ReviewNote if update succeeded)
+        if not isinstance(updated_note, ReviewNote):
+            return [TextContent(
+                type="text",
+                text=f"Error: Unexpected error - note type changed after update"
+            )]
 
         rating_text = {
             1: "poor (need to review again soon)",

@@ -1,20 +1,12 @@
 # LearnBase
 ## Overview
 
-Learnbase is a quiz / note reviewing tool that consists of 3 parts:
-- a learnbase directory where you store all of your notes in md files
-- an mcp server that handles the file operations for these notes
-- skills files that prompt an LLM to carry out socratic quizzes and verify note accuracy with research
+Learnbase started as a quiz / note reviewing tool but is expanding to become a tool for custom knowledge and task management.
 
-The benefit of this is that the mcp server ensures reliable and controllable interactions with your notes (i.e. Your agent won't accidentally delete everything). The skills file means that once your agent has retrieved your notes data, the rest of the interaction exists just in your chat (so you're not making endless MCP tool calls).
-
-## Notes on the setup
-
-This tool was built and tested with Claude Code. However it is intended to be set up easily with any terminal agent (although the skills file may need tweaking here and there depending on which agent you end up using. For example, Gemini I found was a little less conversational than Claude and may need some extra prompting) 
-
-It can be implemented with desktop instances but skills are less compatible here (atleast with anthropic) so as a work around you could simply copy or link the skills folder in as a prompt in your chat/project.
 
 ## Quick Start
+> Notes on the setup:
+This tool was built and tested with Claude Code. However it is intended to beset up easily with any terminal agent with a bit of tweaking
 
 ### 1. Install LearnBase
 
@@ -32,8 +24,6 @@ venv\Scripts\activate     # On Windows
 # Install the MCP server
 pip install -e .
 ```
-
-This installs the LearnBase MCP server that Claude will use to manage your notes.
 
 ### 2. Set Up the MCP Server
 #### For the terminal (Claude Code)
@@ -74,23 +64,6 @@ Edit your `~/.claude.json` file and add the LearnBase MCP server configuration:
 ```
 
 If Claude can access the LearnBase tools, you're all set!
-
-#### For desktop 
-Add this to your Claude Desktop config at `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "learnbase": {
-      "command": "/absolute/path/to/learnbase/venv/bin/python",
-      "args": ["-m", "learnbase.mcp_server"]
-    }
-  }
-}
-```
-
-**Important**: Replace `/absolute/path/to/learnbase` with where you actually put LearnBase.
-
 
 ### 3. Add the Skills
 

@@ -5,12 +5,12 @@ from typing import Any, Literal
 from mcp.types import TextContent
 
 from ..core.note_manager import NoteManager
-from ..core.models import Note
+from ..core.models import Note, ReviewNote, ReferenceNote
 
 logger = logging.getLogger(__name__)
 
 
-def _get_verification_status(note: Note) -> Literal["unverified", "low_confidence", "verified"]:
+def _get_verification_status(note: Note) -> Literal["unverified", "low_confidence", "verified", "reference"]:
     """
     Determine verification status for a note.
 
@@ -18,8 +18,10 @@ def _get_verification_status(note: Note) -> Literal["unverified", "low_confidenc
         note: Note instance
 
     Returns:
-        Verification status: "unverified", "low_confidence", or "verified"
+        Verification status: "unverified", "low_confidence", "verified", or "reference"
     """
+    if isinstance(note, ReferenceNote):
+        return "reference"
     if not note.sources:
         return "unverified"
     if note.confidence_score is not None and note.confidence_score < 0.6:
@@ -31,7 +33,8 @@ def handle_add_note(note_manager: NoteManager, arguments: Any) -> list[TextConte
     """Handle add_note tool."""
     title = arguments.get("title")
     body = arguments.get("body")
-    review_mode = arguments.get("review_mode", "spaced")
+    note_type = arguments.get("note_type", "review")  # Default to review
+    review_mode = arguments.get("review_mode")
     schedule_pattern = arguments.get("schedule_pattern")
 
     if not title or not body:
@@ -41,12 +44,24 @@ def handle_add_note(note_manager: NoteManager, arguments: Any) -> list[TextConte
         )]
 
     try:
-        filename = note_manager.create_note(title, body, review_mode, schedule_pattern)
+        filename = note_manager.create_note(
+            title=title,
+            body=body,
+            note_type=note_type,
+            review_mode=review_mode,
+            schedule_pattern=schedule_pattern
+        )
 
-        return [TextContent(
-            type="text",
-            text=f"✓ Created note: {filename}\nTitle: {title}\nMode: {review_mode}\nNext review: today"
-        )]
+        if note_type == 'reference':
+            return [TextContent(
+                type="text",
+                text=f"✓ Created reference note: {filename}\nTitle: {title}\nType: Reference (storage only)"
+            )]
+        else:
+            return [TextContent(
+                type="text",
+                text=f"✓ Created review note: {filename}\nTitle: {title}\nMode: {review_mode or 'spaced'}\nNext review: today"
+            )]
     except ValueError as e:
         logger.error(f"Validation error creating note: {e}")
         return [TextContent(
@@ -84,7 +99,15 @@ def handle_get_note(note_manager: NoteManager, arguments: Any) -> list[TextConte
             text=f"Error: Note {filename} not found"
         )]
 
-    result = note.format_full()
+    # Format differently based on note type
+    if isinstance(note, ReviewNote):
+        result = note.format_full()
+    else:  # ReferenceNote
+        result = f"# {note.title}\n\n"
+        result += f"**File**: {note.filename}\n"
+        result += f"**Type**: Reference\n\n"
+        result += "---\n\n"
+        result += note.body
 
     return [TextContent(type="text", text=result)]
 
@@ -128,33 +151,38 @@ def handle_list_notes(note_manager: NoteManager, arguments: Any) -> list[TextCon
 
     result = f"## {header}\n\n"
     for note in notes:
-        days = note.days_until_review()
-        if days < 0:
-            status = f"overdue by {-days} days"
-        elif days == 0:
-            status = "due today"
-        else:
-            status = f"due in {days} days"
+        if isinstance(note, ReviewNote):
+            days = note.days_until_review()
+            if days < 0:
+                status = f"overdue by {-days} days"
+            elif days == 0:
+                status = "due today"
+            else:
+                status = f"due in {days} days"
 
-        # Get verification status
-        verification_status = _get_verification_status(note)
+            # Get verification status
+            verification_status = _get_verification_status(note)
 
-        # Add visual indicator
-        verification_indicator = ""
-        if verification_status == "unverified":
-            verification_indicator = " ⚠️ [UNVERIFIED]"
-        elif verification_status == "low_confidence":
-            verification_indicator = f" ⚠️ [LOW CONFIDENCE: {note.confidence_score:.2f}]"
+            # Add visual indicator
+            verification_indicator = ""
+            if verification_status == "unverified":
+                verification_indicator = " ⚠️ [UNVERIFIED]"
+            elif verification_status == "low_confidence":
+                verification_indicator = f" ⚠️ [LOW CONFIDENCE: {note.confidence_score:.2f}]"
 
-        result += f"### {note.title}{verification_indicator}\n"
-        result += f"- **File**: {note.filename}\n"
-        result += f"- **Status**: {status}\n"
-        result += f"- **Mode**: {note.review_mode}\n"
-        result += f"- **Reviews**: {note.review_count}, **Ease**: {note.ease_factor:.2f}\n"
-        result += f"- **Verification**: {verification_status}"
-        if note.confidence_score is not None:
-            result += f", **Confidence**: {note.confidence_score:.2f}"
-        result += f", **Sources**: {len(note.sources)}\n\n"
+            result += f"### {note.title}{verification_indicator}\n"
+            result += f"- **File**: {note.filename}\n"
+            result += f"- **Status**: {status}\n"
+            result += f"- **Mode**: {note.review_mode}\n"
+            result += f"- **Reviews**: {note.review_count}, **Ease**: {note.ease_factor:.2f}\n"
+            result += f"- **Verification**: {verification_status}"
+            if note.confidence_score is not None:
+                result += f", **Confidence**: {note.confidence_score:.2f}"
+            result += f", **Sources**: {len(note.sources)}\n\n"
+        else:  # ReferenceNote
+            result += f"### {note.title}\n"
+            result += f"- **File**: {note.filename}\n"
+            result += f"- **Type**: Reference\n\n"
 
     return [TextContent(type="text", text=result)]
 
