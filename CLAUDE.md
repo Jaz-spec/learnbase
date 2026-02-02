@@ -96,20 +96,21 @@ class Note:
 
 ## Review Session Protocol
 
-The MCP server works with a Claude Skill at `~/.claude/skills/learnbase/SKILL.md`:
+The MCP server works with three specialized Claude Skills:
 
-1. AI calls `get_due_notes()` to see what's due
-2. AI calls `review_note(filename)` to get note content
-3. **Skill conducts review**: Generates 3+ questions, evaluates answers, tracks scores in memory
-4. AI calls `record_review(filename, rating)` where rating 1-4 determines next interval:
-   - 1 (poor): Reset to 1 day, decrease ease
-   - 2 (fair): Half interval, slightly decrease ease
-   - 3 (good): Interval × ease_factor
-   - 4 (excellent): Interval × 2.5, increase ease
-5. AI calls `save_session_history(filename, session_data)` with all question data:
-   - Saves session history to JSON
-   - Updates question_performance in note frontmatter using EMA
-   - Single operation replaces previous per-question saves
+1. **Review Skill** (`~/.claude/skills/learnbase/review.md`)
+   - Conducts Socratic review sessions with spaced repetition
+   - Uses: `get_due_notes()`, `review_note()`, `record_review()`, `save_session_history()`
+
+2. **Capture Skill** (`~/.claude/skills/learnbase/capture.md`)
+   - Creates well-structured notes with proper linking and tagging
+   - Uses: `add_note()`, `edit_note()`, `get_note()`
+
+3. **To-Learn Skill** (`~/.claude/skills/learnbase/to-learn.md`)
+   - Manages learning topic backlog and tracks progress
+   - Uses: `add_to_learn()`, `list_to_learn()`, `update_to_learn()`, `remove_to_learn()`
+
+These skills are loaded on-demand when users trigger relevant phrases. See skill files for detailed protocols.
 
 ## Key Files
 
@@ -127,8 +128,16 @@ The MCP server works with a Claude Skill at `~/.claude/skills/learnbase/SKILL.md
 - Indexed: All note types (review, reference, evergreen)
 - Embeddings: 384-dimensional vectors (all-MiniLM-L6-v2)
 
+**Active Context (Project Tracking):**
+- `~/.learnbase/active-context/` - Project tracking directory
+- `~/.learnbase/active-context/*.md` - Project files with commit history
+- `~/.learnbase/active-context/archive/` - Completed projects
+- `scripts/parse_commits.py` - Git commit parser (terminal-callable)
+
 **Skills:**
-- `~/.claude/skills/learnbase/SKILL.md` - Review protocol for AI
+- `~/.claude/skills/learnbase/review.md` - Review session protocol
+- `~/.claude/skills/learnbase/capture.md` - Note creation workflow
+- `~/.claude/skills/learnbase/to-learn.md` - Topic bookmarking
 
 ## Development Guidelines
 
@@ -154,6 +163,13 @@ The MCP server works with a Claude Skill at `~/.claude/skills/learnbase/SKILL.md
 - Metadata supports filtering by note type, confidence, source count
 - Local embeddings by default (no API keys required)
 - OpenAI embeddings optional (requires OPENAI_API_KEY env var)
+
+**Active Context:**
+- Terminal-callable script (no MCP integration yet)
+- Plain markdown files (no YAML frontmatter)
+- Week-based commit grouping
+- Atomic file writes
+- Manual editing supported (Obsidian-compatible)
 
 ## Complementary Workflow
 
