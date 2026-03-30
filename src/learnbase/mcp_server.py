@@ -12,6 +12,10 @@ from mcp.types import Tool, TextContent
 from .core.note_manager import NoteManager
 from .core.to_learn_manager import ToLearnManager
 from .core.rag_manager import RAGManager
+from .core.tasks_manager import TasksManager
+from .core.daily_manager import DailyManager
+from .core.context_parser import ContextParser
+from .core.calendar_manager import CalendarManager
 from .tools import (
     handle_add_note,
     handle_get_note,
@@ -35,6 +39,22 @@ from .tools import (
     handle_reindex_all_notes,
     handle_get_index_stats,
 )
+from .tools.tasks import (
+    handle_create_task_tool,
+    handle_get_task_tool,
+    handle_list_tasks_tool,
+    handle_update_task_tool,
+    handle_archive_task_tool,
+)
+from .tools.daily import (
+    handle_create_daily_plan_tool,
+    handle_update_daily_reflection_tool,
+)
+from .tools.context import (
+    handle_get_context_tool,
+    handle_categorize_task_tool,
+)
+from .tools.calendar import handle_get_calendar_events
 
 
 def setup_logging():
@@ -76,6 +96,12 @@ note_manager.rag_manager = rag_manager
 
 # Initialize to_learn_manager independently
 to_learn_manager = ToLearnManager()
+
+# Initialize task management system
+tasks_manager = TasksManager()
+daily_manager = DailyManager(tasks_manager)
+context_parser = ContextParser()
+calendar_manager = CalendarManager()
 
 
 @app.list_tools()
@@ -530,7 +556,215 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {}
             }
-        )
+        ),
+        # Task Management tools
+        Tool(
+            name="create_task",
+            description="Create a new task with auto-categorization",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Task title"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Task description (markdown)"
+                    },
+                    "due": {
+                        "type": "string",
+                        "description": "Due date/time (ISO 8601 datetime)"
+                    },
+                    "categories": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Task categories (people, idea, project, admin)"
+                    },
+                    "workspace": {
+                        "type": "string",
+                        "enum": ["work", "personal", "contract"],
+                        "description": "Workspace"
+                    },
+                    "project": {
+                        "type": "string",
+                        "description": "Project name (from active-context)"
+                    },
+                    "confidence": {
+                        "type": "object",
+                        "description": "Confidence scores for auto-categorization"
+                    },
+                    "reasoning": {
+                        "type": "string",
+                        "description": "Explanation of categorization choices"
+                    }
+                },
+                "required": ["title", "due"]
+            }
+        ),
+        Tool(
+            name="get_task",
+            description="Get a task by ID",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "Task ID (e.g., '2026-02-03-call-dan')"
+                    }
+                },
+                "required": ["task_id"]
+            }
+        ),
+        Tool(
+            name="list_tasks",
+            description="List tasks with optional filters",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "completed"],
+                        "description": "Filter by status"
+                    },
+                    "workspace": {
+                        "type": "string",
+                        "enum": ["work", "personal", "contract"],
+                        "description": "Filter by workspace"
+                    },
+                    "project": {
+                        "type": "string",
+                        "description": "Filter by project name"
+                    },
+                    "categories": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Filter by categories (must have ALL)"
+                    },
+                    "due_date": {
+                        "type": "string",
+                        "description": "Filter by due date (ISO 8601)"
+                    }
+                }
+            }
+        ),
+        Tool(
+            name="update_task",
+            description="Update task fields",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "Task ID"
+                    },
+                    "updates": {
+                        "type": "object",
+                        "description": "Dictionary of fields to update"
+                    }
+                },
+                "required": ["task_id", "updates"]
+            }
+        ),
+        Tool(
+            name="archive_task",
+            description="Archive a completed task",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "Task ID"
+                    }
+                },
+                "required": ["task_id"]
+            }
+        ),
+        # Daily Workflow tools
+        Tool(
+            name="create_daily_plan",
+            description="Generate daily task list for morning workflow",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Optional date (ISO 8601, defaults to today)"
+                    }
+                }
+            }
+        ),
+        Tool(
+            name="update_daily_reflection",
+            description="Update tasks with evening reflection",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Date (ISO 8601)"
+                    },
+                    "completed": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Completed tasks [{task_id, notes}, ...]"
+                    },
+                    "incomplete": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Incomplete tasks [{task_id, reason, rollover}, ...]"
+                    },
+                    "new_tasks": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "New task IDs created during reflection"
+                    },
+                    "reflection_notes": {
+                        "type": "string",
+                        "description": "General reflection notes"
+                    }
+                },
+                "required": ["date", "completed", "incomplete"]
+            }
+        ),
+        # Context tools
+        Tool(
+            name="get_context",
+            description="Get structured context from active-context/index.md",
+            inputSchema={
+                "type": "object",
+                "properties": {}
+            }
+        ),
+        Tool(
+            name="categorize_task",
+            description="Auto-categorize task from natural language with confidence scoring",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "User's task description text"
+                    }
+                },
+                "required": ["text"]
+            }
+        ),
+        # Calendar tools
+        Tool(
+            name="get_calendar_events",
+            description="Get today's Google Calendar events with meeting name, time, and attendees",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "calendar_id": {
+                        "type": "string",
+                        "description": "Calendar ID (default: 'primary')",
+                        "default": "primary"
+                    }
+                }
+            }
+        ),
     ]
 
 
@@ -567,6 +801,20 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         "remove_from_index": handle_remove_from_index,
         "reindex_all_notes": handle_reindex_all_notes,
         "get_index_stats": handle_get_index_stats,
+        # Task management
+        "create_task": handle_create_task_tool,
+        "get_task": handle_get_task_tool,
+        "list_tasks": handle_list_tasks_tool,
+        "update_task": handle_update_task_tool,
+        "archive_task": handle_archive_task_tool,
+        # Daily workflow
+        "create_daily_plan": handle_create_daily_plan_tool,
+        "update_daily_reflection": handle_update_daily_reflection_tool,
+        # Context tools
+        "get_context": handle_get_context_tool,
+        "categorize_task": handle_categorize_task_tool,
+        # Calendar tools
+        "get_calendar_events": handle_get_calendar_events,
     }
 
     # Dispatch to handler
@@ -581,6 +829,18 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         elif name in ("index_note", "search_notes", "remove_from_index",
                       "reindex_all_notes", "get_index_stats"):
             return handler(rag_manager, arguments)
+        # Use tasks_manager for task management tools
+        elif name in ("create_task", "get_task", "list_tasks", "update_task", "archive_task"):
+            return handler(tasks_manager, arguments)
+        # Use daily_manager for daily workflow tools
+        elif name in ("create_daily_plan", "update_daily_reflection"):
+            return handler(daily_manager, arguments)
+        # Use context_parser for context tools
+        elif name in ("get_context", "categorize_task"):
+            return handler(context_parser, arguments)
+        # Use calendar_manager for calendar tools
+        elif name == "get_calendar_events":
+            return handler(calendar_manager, arguments)
         # Use note_manager for everything else
         else:
             return handler(note_manager, arguments)
