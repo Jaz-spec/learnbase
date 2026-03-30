@@ -109,3 +109,63 @@ def parse_dict(value: Any, default: dict | None = None) -> dict:
     if value is None:
         return default if default is not None else {}
     return dict(value)
+
+
+def parse_categories(value: Any, default: list[str] | None = None) -> list[str]:
+    """Parse categories list with validation.
+
+    Args:
+        value: Value to parse (list of strings)
+        default: Default value if None
+
+    Returns:
+        Parsed list of category strings or default (empty list if default not provided)
+    """
+    if value is None:
+        return default if default is not None else []
+
+    # Ensure it's a list
+    if not isinstance(value, list):
+        return [str(value)]
+
+    # Ensure all items are strings
+    return [str(item) for item in value]
+
+
+def parse_workspace(value: Any, default: str = "personal") -> str:
+    """Parse and validate workspace enum.
+
+    Args:
+        value: Value to parse
+        default: Default workspace if None or invalid
+
+    Returns:
+        Valid workspace string: "work", "personal", or "contract"
+    """
+    if value is None:
+        return default
+
+    workspace = str(value).lower()
+    if workspace in ["work", "personal", "contract"]:
+        return workspace
+
+    return default
+
+
+def parse_confidence(value: Any) -> dict[str, float]:
+    """Parse confidence scores dict.
+
+    Args:
+        value: Value to parse (dict with string keys and float values)
+
+    Returns:
+        Parsed dict with float values or empty dict
+    """
+    if value is None:
+        return {}
+
+    if not isinstance(value, dict):
+        return {}
+
+    # Ensure all values are floats
+    return {str(k): float(v) for k, v in value.items()}

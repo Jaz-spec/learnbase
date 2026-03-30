@@ -13,7 +13,10 @@ from .parsers import (
     parse_float,
     parse_optional_float,
     parse_list,
-    parse_dict
+    parse_dict,
+    parse_categories,
+    parse_workspace,
+    parse_confidence
 )
 
 # These control how quickly the performance metric adapts to new scores
@@ -354,3 +357,264 @@ class ReviewNote(Note):
             raise ValueError(f"Confidence score must be between 0.0 and 1.0, got {score}")
 
         self.confidence_score = score
+
+
+# ================================================================
+# TASK - Task management
+# ================================================================
+@dataclass
+class Task:
+    """Task with YAML frontmatter and markdown body."""
+
+    # Core fields
+    id: str  # e.g., "2026-02-03-call-dan"
+    title: str
+    description: str  # Markdown body
+
+    # Categorization
+    categories: List[str]  # [people, idea, project, admin]
+    workspace: str  # work | personal | contract
+    project: Optional[str]  # Link to active-context project
+
+    # Scheduling
+    due: datetime
+    status: str  # pending | in_progress | completed
+    dependencies: List[str] = field(default_factory=list)  # Task IDs that block this task
+
+    # Metadata
+    created: datetime = field(default_factory=datetime.now)
+    updated: datetime = field(default_factory=datetime.now)
+    completed: Optional[datetime] = None
+
+    # Auto-categorization
+    confidence: Dict[str, float] = field(default_factory=dict)  # {workspace: 0.85, project: 0.9, ...}
+    reasoning: Optional[str] = None  # Why LLM chose these categories
+
+    filename: str = ""  # Generated from id
+
+    @classmethod
+    def from_markdown_file(cls, filepath: Path) -> 'Task':
+        """
+        Load task from markdown file with YAML frontmatter.
+
+        Args:
+            filepath: Path to the markdown file
+
+        Returns:
+            Task instance
+        """
+        with open(filepath, 'r', encoding='utf-8') as f:
+            post = frontmatter.load(f)
+
+        now = datetime.now()
+
+        return Task(
+            id=str(post.get('id', filepath.stem)),
+            title=str(post.get('title', '')),
+            description=str(post.content),
+            categories=parse_categories(post.get('categories')),
+            workspace=parse_workspace(post.get('workspace')),
+            project=str(post['project']) if post.get('project') else None,
+            due=parse_datetime(post.get('due'), now),
+            status=str(post.get('status', 'pending')),
+            dependencies=parse_categories(post.get('dependencies')),
+            created=parse_datetime(post.get('created'), now),
+            updated=parse_datetime(post.get('updated'), now),
+            completed=parse_datetime(post['completed'], now) if post.get('completed') else None,
+            confidence=parse_confidence(post.get('confidence')),
+            reasoning=str(post['reasoning']) if post.get('reasoning') else None,
+            filename=filepath.name
+        )
+
+    def to_markdown_file(self) -> str:
+        """
+        Serialize task to markdown with YAML frontmatter.
+
+        Returns:
+            String containing the complete markdown file
+        """
+        metadata = {
+            'id': self.id,
+            'title': self.title,
+            'categories': self.categories,
+            'workspace': self.workspace,
+            'project': self.project,
+            'due': self.due.isoformat(),
+            'status': self.status,
+            'dependencies': self.dependencies,
+            'created': self.created.isoformat(),
+            'updated': self.updated.isoformat(),
+            'completed': self.completed.isoformat() if self.completed else None,
+            'confidence': self.confidence,
+            'reasoning': self.reasoning
+        }
+
+        post = frontmatter.Post(self.description, **metadata)
+        return frontmatter.dumps(post)
+
+    @staticmethod
+    def create_id(title: str, due: datetime) -> str:
+        """
+        Generate task ID: YYYY-MM-DD-slug.
+
+        Args:
+            title: Task title
+            due: Due date
+
+        Returns:
+            Task ID string
+        """
+        # Format date prefix
+        date_prefix = due.strftime('%Y-%m-%d')
+
+        # Create slug from title
+        safe_title = ''.join(c if c.isalnum() or c.isspace() else '' for c in title)
+        slug = '-'.join(safe_title.lower().split())
+
+        # Limit slug length
+        if len(slug) > 40:
+            slug = slug[:40]
+
+        return f"{date_prefix}-{slug}"
+
+    @staticmethod
+    def create_filename(task_id: str) -> str:
+        """
+        Create filename from task ID.
+
+        Args:
+            task_id: Task ID
+
+        Returns:
+            Filename with .md extension
+        """
+        return f"{task_id}.md"
+
+
+# ================================================================
+# DAILY LOG - Daily workflow
+# ================================================================
+@dataclass
+class DailyLog:
+    """Daily log with tasks and reflection."""
+
+    date: datetime  # 2026-02-02
+    tasks_due_today: List[str] = field(default_factory=list)  # Task IDs
+    tasks_overdue: List[str] = field(default_factory=list)  # Task IDs
+    tasks_this_week: List[str] = field(default_factory=list)  # Task IDs
+    priorities: List[str] = field(default_factory=list)  # Ordered task IDs
+
+    # Evening reflection
+    completed: List[Dict[str, Any]] = field(default_factory=list)  # [{task_id, notes}, ...]
+    incomplete: List[Dict[str, Any]] = field(default_factory=list)  # [{task_id, reason, rollover}, ...]
+    new_tasks: List[str] = field(default_factory=list)  # Task IDs created during reflection
+    reflection_notes: Optional[str] = None  # General notes about the day
+
+    @classmethod
+    def from_markdown_file(cls, filepath: Path) -> 'DailyLog':
+        """
+        Parse daily log markdown.
+
+        Args:
+            filepath: Path to the markdown file
+
+        Returns:
+            DailyLog instance
+
+        Note: This is a simplified parser that extracts task IDs from markdown.
+        The daily log format is human-readable and may not be strictly parseable.
+        """
+        # Extract date from filename (YYYY-MM-DD.md)
+        date_str = filepath.stem
+        date = datetime.fromisoformat(date_str)
+
+        # For now, return a basic DailyLog
+        # The daily log is primarily generated, not parsed
+        return DailyLog(date=date)
+
+    def to_markdown_file(self) -> str:
+        """
+        Generate daily log markdown.
+
+        Returns:
+            String containing the complete markdown file
+        """
+        lines = [
+            f"# Daily Log - {self.date.strftime('%A, %Y-%m-%d')}",
+            "",
+            "## Today's Tasks",
+            ""
+        ]
+
+        if self.tasks_overdue:
+            lines.append("### Overdue ({})".format(len(self.tasks_overdue)))
+            for task_id in self.tasks_overdue:
+                lines.append(f"- [ ] 🔴 {task_id}")
+            lines.append("")
+
+        if self.tasks_due_today:
+            lines.append("### Due Today ({})".format(len(self.tasks_due_today)))
+            for task_id in self.tasks_due_today:
+                lines.append(f"- [ ] {task_id}")
+            lines.append("")
+
+        if self.tasks_this_week:
+            lines.append("### This Week ({})".format(len(self.tasks_this_week)))
+            for task_id in self.tasks_this_week:
+                lines.append(f"- [ ] {task_id}")
+            lines.append("")
+
+        if self.priorities:
+            lines.append("## Priorities")
+            for i, task_id in enumerate(self.priorities, 1):
+                lines.append(f"{i}. {task_id}")
+            lines.append("")
+
+        lines.extend([
+            "---",
+            "",
+            "## Evening Reflection",
+            "",
+            "### Completed",
+            ""
+        ])
+
+        for item in self.completed:
+            task_id = item.get('task_id', '')
+            notes = item.get('notes', '')
+            lines.append(f"✓ **{task_id}**")
+            if notes:
+                lines.append(f"  - Notes: {notes}")
+            lines.append("")
+
+        lines.extend([
+            "### Incomplete",
+            ""
+        ])
+
+        for item in self.incomplete:
+            task_id = item.get('task_id', '')
+            reason = item.get('reason', '')
+            rollover = item.get('rollover', False)
+            lines.append(f"✗ **{task_id}**" + (" → Rolling to tomorrow" if rollover else ""))
+            if reason:
+                lines.append(f"  - Reason: {reason}")
+            lines.append("")
+
+        if self.new_tasks:
+            lines.extend([
+                "### New Tasks Created",
+                ""
+            ])
+            for task_id in self.new_tasks:
+                lines.append(f"- {task_id}")
+            lines.append("")
+
+        if self.reflection_notes:
+            lines.extend([
+                "### Notes",
+                self.reflection_notes,
+                ""
+            ])
+
+        return "\n".join(lines)
