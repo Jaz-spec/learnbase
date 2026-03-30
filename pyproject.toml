@@ -24,5 +24,8 @@ openai = [
     "openai>=1.0.0",
 ]
 
+[project.scripts]
+learnbase-gui = "learnbase.gui.app:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
