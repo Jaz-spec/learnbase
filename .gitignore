@@ -44,3 +44,7 @@ Thumbs.dbx
 
 # Misc
 docs/
+
+# Google Calendar OAuth secrets
+google-calendar/credentials.json
+google-calendar/token.json
