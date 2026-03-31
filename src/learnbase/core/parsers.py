@@ -4,6 +4,25 @@ from datetime import datetime
 from typing import Any
 
 
+def _strip_timezone(dt: datetime) -> datetime:
+    """Strip timezone info to ensure offset-naive datetime.
+
+    The codebase uses datetime.now() (offset-naive) throughout,
+    but YAML parsers may return offset-aware datetimes when loading
+    ISO 8601 strings from frontmatter. This helper ensures consistency
+    to prevent 'can't compare offset-naive and offset-aware datetimes' errors.
+
+    Args:
+        dt: datetime that may or may not have timezone info
+
+    Returns:
+        Offset-naive datetime (tzinfo removed if present)
+    """
+    if dt.tzinfo is not None:
+        return dt.replace(tzinfo=None)
+    return dt
+
+
 def parse_datetime(value: Any, default: datetime) -> datetime:
     """Parse datetime from string or datetime object.
 
@@ -12,13 +31,13 @@ def parse_datetime(value: Any, default: datetime) -> datetime:
         default: Default value
 
     Returns:
-        Parsed datetime or default
+        Parsed datetime or default (always offset-naive)
     """
     if value is None:
         return default
     if isinstance(value, datetime):
-        return value
-    return datetime.fromisoformat(str(value))
+        return _strip_timezone(value)
+    return _strip_timezone(datetime.fromisoformat(str(value)))
 
 
 def parse_review(value: Any, default: datetime | None = None) -> datetime | None:
@@ -29,13 +48,13 @@ def parse_review(value: Any, default: datetime | None = None) -> datetime | None
         default: Default value if None
 
     Returns:
-        Parsed datetime or default
+        Parsed datetime or default (always offset-naive if not None)
     """
     if value is None:
         return default
     if isinstance(value, datetime):
-        return value
-    return datetime.fromisoformat(str(value))
+        return _strip_timezone(value)
+    return _strip_timezone(datetime.fromisoformat(str(value)))
 
 def parse_float(value: Any, default: float = 0.0) -> float:
     """Parse float from string or numeric value.
