@@ -14,7 +14,8 @@ from .core.to_learn_manager import ToLearnManager
 from .core.rag_manager import RAGManager
 from .core.tasks_manager import TasksManager
 from .core.daily_manager import DailyManager
-from .core.context_parser import ContextParser
+from .core.context_manager import ContextManager
+from .core.planning_manager import PlanningManager
 from .core.calendar_manager import CalendarManager
 from .tools import (
     handle_add_note,
@@ -53,8 +54,28 @@ from .tools.daily import (
 from .tools.context import (
     handle_get_context_tool,
     handle_categorize_task_tool,
+    handle_add_project_tool,
+    handle_update_project_tool,
+    handle_archive_project_tool,
+    handle_add_person_tool,
+    handle_update_person_tool,
+    handle_remove_person_tool,
+)
+from .tools.planning import (
+    handle_get_priorities_tool,
+    handle_create_priority_tool,
+    handle_update_priority_tool,
+    handle_get_planning_context_tool,
+    handle_save_review_tool,
 )
 from .tools.calendar import handle_get_calendar_events
+from .tools.drills import (
+    handle_add_drill_card,
+    handle_review_drill,
+    handle_list_due_drills,
+    handle_get_drill,
+    handle_regenerate_variants,
+)
 
 
 def setup_logging():
@@ -100,7 +121,8 @@ to_learn_manager = ToLearnManager()
 # Initialize task management system
 tasks_manager = TasksManager()
 daily_manager = DailyManager(tasks_manager)
-context_parser = ContextParser()
+context_manager = ContextManager()
+planning_manager = PlanningManager(context_manager, tasks_manager)
 calendar_manager = CalendarManager()
 
 
@@ -597,6 +619,10 @@ async def list_tools() -> list[Tool]:
                     "reasoning": {
                         "type": "string",
                         "description": "Explanation of categorization choices"
+                    },
+                    "priority_id": {
+                        "type": "string",
+                        "description": "Linked priority ID (from planning)"
                     }
                 },
                 "required": ["title", "due"]
@@ -730,7 +756,7 @@ async def list_tools() -> list[Tool]:
         # Context tools
         Tool(
             name="get_context",
-            description="Get structured context from active-context/index.md",
+            description="Get active projects and people context with staleness indicators",
             inputSchema={
                 "type": "object",
                 "properties": {}
@@ -738,7 +764,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="categorize_task",
-            description="Auto-categorize task from natural language with confidence scoring",
+            description="Auto-categorize task from natural language with staleness-aware confidence scoring",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -748,6 +774,252 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["text"]
+            }
+        ),
+        Tool(
+            name="add_project",
+            description="Add a new project to the context database",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Project slug (e.g., 'learnbase', 'distribution')"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Display name"
+                    },
+                    "workspace": {
+                        "type": "string",
+                        "enum": ["work", "personal", "contract"],
+                        "description": "Workspace"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Short project description (2-3 sentences)"
+                    }
+                },
+                "required": ["id", "name", "workspace", "description"]
+            }
+        ),
+        Tool(
+            name="update_project",
+            description="Update a project. Always refreshes staleness timestamp.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Project slug"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "New display name"
+                    },
+                    "workspace": {
+                        "type": "string",
+                        "enum": ["work", "personal", "contract"],
+                        "description": "New workspace"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "New description"
+                    }
+                },
+                "required": ["id"]
+            }
+        ),
+        Tool(
+            name="archive_project",
+            description="Archive a project (sets inactive, excluded from categorization)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Project slug to archive"
+                    }
+                },
+                "required": ["id"]
+            }
+        ),
+        Tool(
+            name="add_person",
+            description="Add a person to the context database",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Person slug (e.g., 'dan', 'izaak')"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Display name"
+                    },
+                    "relationship": {
+                        "type": "string",
+                        "description": "Relationship description (e.g., 'boss and CEO')"
+                    }
+                },
+                "required": ["id", "name", "relationship"]
+            }
+        ),
+        Tool(
+            name="update_person",
+            description="Update a person's details",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Person slug"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "New display name"
+                    },
+                    "relationship": {
+                        "type": "string",
+                        "description": "New relationship description"
+                    }
+                },
+                "required": ["id"]
+            }
+        ),
+        Tool(
+            name="remove_person",
+            description="Remove a person from the context database",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Person slug to remove"
+                    }
+                },
+                "required": ["id"]
+            }
+        ),
+        # Planning tools
+        Tool(
+            name="get_priorities",
+            description="List priorities with optional filters",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["monthly", "weekly"],
+                        "description": "Filter by scope"
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": "Filter by period (e.g., '2026-03' or '2026-W14')"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "completed", "rolled_over"],
+                        "description": "Filter by status"
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Filter by project"
+                    }
+                }
+            }
+        ),
+        Tool(
+            name="create_priority",
+            description="Create a new priority (monthly or weekly)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "Priority description (e.g., 'Ship calendar integration')"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": ["monthly", "weekly"],
+                        "description": "Priority scope"
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": "Period (e.g., '2026-04' for monthly, '2026-W14' for weekly)"
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Linked project ID (optional)"
+                    }
+                },
+                "required": ["description", "scope", "period"]
+            }
+        ),
+        Tool(
+            name="update_priority",
+            description="Update a priority's status or details",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Priority ID"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "completed", "rolled_over"],
+                        "description": "New status"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "New description"
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "New linked project"
+                    }
+                },
+                "required": ["id"]
+            }
+        ),
+        Tool(
+            name="get_planning_context",
+            description="Get aggregated planning context (projects, priorities, tasks, calendar) for planning conversations",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["monthly", "weekly"],
+                        "description": "Planning scope"
+                    }
+                },
+                "required": ["scope"]
+            }
+        ),
+        Tool(
+            name="save_review",
+            description="Save a planning review summary as markdown",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["monthly", "weekly"],
+                        "description": "Review scope"
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": "Period (e.g., '2026-04' or '2026-W14')"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Markdown content of the review summary"
+                    }
+                },
+                "required": ["scope", "period", "content"]
             }
         ),
         # Calendar tools
@@ -763,6 +1035,88 @@ async def list_tools() -> list[Tool]:
                         "default": "primary"
                     }
                 }
+            }
+        ),
+        # Drill card tools (code flashcards)
+        Tool(
+            name="add_drill_card",
+            description=(
+                "Capture a new code drill flashcard. Runs a similarity check against "
+                "existing drills first (set force=true to skip). Generates Buddy/Reverse "
+                "variants via LLM at capture time so review stays offline."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Short human-readable title"},
+                    "prompt": {"type": "string", "description": "The drill question / goal (multi-line allowed)"},
+                    "model_answer": {"type": "string", "description": "Reference solution code"},
+                    "language": {"type": "string", "description": "Code language (bash, python, sql, regex, etc.)"},
+                    "why_captured": {"type": "string", "description": "One-line context for why this was captured"},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Freeform tags"},
+                    "force": {"type": "boolean", "description": "Skip similarity check. Default: false", "default": False},
+                    "skip_variants": {"type": "boolean", "description": "Skip LLM variant generation. Default: false", "default": False}
+                },
+                "required": ["title", "prompt", "model_answer", "language"]
+            }
+        ),
+        Tool(
+            name="review_drill",
+            description=(
+                "Record a drill review with pass/fail self-assessment. Ladder SR: pass advances "
+                "one step, fail demotes one step. Only is_first_mode=true updates SR; other mode "
+                "attempts on the same card in the same session are free practice."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "Drill card filename"},
+                    "passed": {"type": "boolean", "description": "User's self-assessment"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["drill", "buddy", "reverse"],
+                        "description": "Which mode the user just attempted",
+                        "default": "drill"
+                    },
+                    "is_first_mode": {
+                        "type": "boolean",
+                        "description": "True if this is the first mode attempted for this card this session. Only first-mode attempts update SR.",
+                        "default": True
+                    }
+                },
+                "required": ["filename", "passed"]
+            }
+        ),
+        Tool(
+            name="list_due_drills",
+            description="List drill cards that are due today or earlier, ordered by due date.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Maximum number to return"}
+                }
+            }
+        ),
+        Tool(
+            name="get_drill",
+            description="Fetch a drill card with prompt, model answer, and Buddy/Reverse variants.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "Drill card filename"}
+                },
+                "required": ["filename"]
+            }
+        ),
+        Tool(
+            name="regenerate_variants",
+            description="Retry LLM generation of Buddy/Reverse variants for a drill (typically after a failed capture-time generation).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "Drill card filename"}
+                },
+                "required": ["filename"]
             }
         ),
     ]
@@ -813,8 +1167,26 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         # Context tools
         "get_context": handle_get_context_tool,
         "categorize_task": handle_categorize_task_tool,
+        "add_project": handle_add_project_tool,
+        "update_project": handle_update_project_tool,
+        "archive_project": handle_archive_project_tool,
+        "add_person": handle_add_person_tool,
+        "update_person": handle_update_person_tool,
+        "remove_person": handle_remove_person_tool,
+        # Planning tools
+        "get_priorities": handle_get_priorities_tool,
+        "create_priority": handle_create_priority_tool,
+        "update_priority": handle_update_priority_tool,
+        "get_planning_context": handle_get_planning_context_tool,
+        "save_review": handle_save_review_tool,
         # Calendar tools
         "get_calendar_events": handle_get_calendar_events,
+        # Drill card tools
+        "add_drill_card": handle_add_drill_card,
+        "review_drill": handle_review_drill,
+        "list_due_drills": handle_list_due_drills,
+        "get_drill": handle_get_drill,
+        "regenerate_variants": handle_regenerate_variants,
     }
 
     # Dispatch to handler
@@ -835,9 +1207,15 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         # Use daily_manager for daily workflow tools
         elif name in ("create_daily_plan", "update_daily_reflection"):
             return handler(daily_manager, arguments)
-        # Use context_parser for context tools
-        elif name in ("get_context", "categorize_task"):
-            return handler(context_parser, arguments)
+        # Use context_manager for context tools
+        elif name in ("get_context", "categorize_task", "add_project",
+                       "update_project", "archive_project", "add_person",
+                       "update_person", "remove_person"):
+            return handler(context_manager, arguments)
+        # Use planning_manager for planning tools
+        elif name in ("get_priorities", "create_priority", "update_priority",
+                       "get_planning_context", "save_review"):
+            return handler(planning_manager, arguments)
         # Use calendar_manager for calendar tools
         elif name == "get_calendar_events":
             return handler(calendar_manager, arguments)

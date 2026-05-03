@@ -23,7 +23,7 @@ except ImportError:
     logger.warning("sentence-transformers not available. Install with: pip install sentence-transformers")
 
 from .note_manager import NoteManager
-from .models import Note, ReviewNote, ReferenceNote, EvergreenNote
+from .models import Note, ReviewNote, ReferenceNote, EvergreenNote, DrillNote
 
 
 class RAGManager:
@@ -174,6 +174,10 @@ class RAGManager:
                 metadata["source_count"] = len(note.sources)
             else:
                 metadata["source_count"] = 0
+        elif isinstance(note, DrillNote):
+            metadata["note_type"] = "drill"
+            metadata["language"] = note.language
+            metadata["source_count"] = 0
         elif isinstance(note, EvergreenNote):
             metadata["note_type"] = "evergreen"
             metadata["source_count"] = 0
