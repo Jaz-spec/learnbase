@@ -1,55 +1,61 @@
 #!/bin/bash
-# Bump version number across all files
-
 set -e
+trap 'echo "[Version] Bump failed. Check the error above."' ERR
 
-CURRENT_VERSION=$(cat VERSION)
-BUMP_TYPE="${1:-patch}"  # major, minor, or patch
+# Only run on main
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$CURRENT_BRANCH" != "main" ]]; then
+  echo "[Version] Not on main branch (currently on $CURRENT_BRANCH). Aborting."
+  exit 1
+fi
 
-# Parse current version
-IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+# Get last tag, default to v0.0.0 if none exists
+LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 
-# Bump version based on type
-case "$BUMP_TYPE" in
-  major)
-    MAJOR=$((MAJOR + 1))
-    MINOR=0
-    PATCH=0
-    ;;
-  minor)
-    MINOR=$((MINOR + 1))
-    PATCH=0
-    ;;
-  patch)
-    PATCH=$((PATCH + 1))
-    ;;
-  *)
-    echo "Usage: $0 {major|minor|patch}"
-    exit 1
-    ;;
-esac
+# Get commit messages since last tag
+COMMITS=$(git log "$LAST_TAG"..HEAD --pretty=format:"%s")
+
+if [[ -z "$COMMITS" ]]; then
+  echo "[Version] No commits since $LAST_TAG. Nothing to bump."
+  exit 0
+fi
+
+# Infer bump type from conventional commits
+BUMP="patch"
+if echo "$COMMITS" | grep -qE "BREAKING CHANGE|^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\(.+\))?!:"; then
+  BUMP="major"
+elif echo "$COMMITS" | grep -qE "^feat(\(.+\))?:"; then
+  BUMP="minor"
+fi
+
+# Parse current version from pyproject.toml
+CURRENT_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
+MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
+PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
+
+# Calculate new version
+if [[ "$BUMP" == "major" ]]; then
+  MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
+elif [[ "$BUMP" == "minor" ]]; then
+  MINOR=$((MINOR + 1)); PATCH=0
+else
+  PATCH=$((PATCH + 1))
+fi
 
 NEW_VERSION="$MAJOR.$MINOR.$PATCH"
 
-echo "Bumping version: $CURRENT_VERSION → $NEW_VERSION"
-
-# Update VERSION file
-echo "$NEW_VERSION" > VERSION
-
-# Update __version__.py
-cat > src/learnbase/__version__.py <<EOF
-"""Version information for LearnBase."""
-
-__version__ = "$NEW_VERSION"
-EOF
+echo "[Version] $LAST_TAG → v$NEW_VERSION ($BUMP bump)"
+echo "[Version] Commits since $LAST_TAG:"
+echo "$COMMITS" | head -10 | sed 's/^/  - /'
 
 # Update pyproject.toml
-sed -i '' "s/version = \".*\"/version = \"$NEW_VERSION\"/" pyproject.toml
+sed -i '' "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" pyproject.toml
 
-echo "✓ Version bumped to $NEW_VERSION"
-echo ""
-echo "Next steps:"
-echo "  1. Update CHANGELOG.md"
-echo "  2. git add VERSION src/learnbase/__version__.py pyproject.toml CHANGELOG.md"
-echo "  3. git commit -m 'chore: bump version to $NEW_VERSION'"
-echo "  4. git tag -a v$NEW_VERSION -m 'Release v$NEW_VERSION'"
+# Commit, tag, push
+git add pyproject.toml
+git commit -m "chore: bump version to $NEW_VERSION"
+git tag "v$NEW_VERSION"
+git push origin main --tags
+
+echo "[Version] Done. Tagged and pushed v$NEW_VERSION."
