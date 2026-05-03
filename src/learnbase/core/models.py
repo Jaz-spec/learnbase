@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Dict, List, Any, Literal, cast
 from pathlib import Path
+import re
 import frontmatter
 
 from .parsers import (
@@ -55,7 +56,35 @@ class Note:
 
         note_type = post.get('type', 'review')
 
-        if note_type == 'reference':
+        if note_type == 'drill':
+            now = datetime.now()
+            created_at = parse_datetime(post.get('created'), now)
+            last_reviewed = parse_review(post.get('last_reviewed'))
+            next_review = parse_datetime(post.get('next_review'), now)
+
+            return DrillNote(
+                filename=filepath.name,
+                title=str(post.get('title', filepath.stem.replace('-', ' ').title())),
+                body=str(post.content),
+                language=str(post.get('language', 'text')),
+                tags=cast(List[str], parse_list(post.get('tags'))),
+                why_captured=str(post.get('why_captured', '')),
+                sources=cast(List[Dict[str, str]], parse_list(post.get('sources'))),
+                created_at=created_at,
+                last_reviewed=last_reviewed,
+                next_review=next_review,
+                ladder_step=parse_int(post.get('ladder_step'), 0),
+                review_count=parse_int(post.get('review_count'), 0),
+                fail_streak=parse_int(post.get('fail_streak'), 0),
+                needs_rewrite=bool(post.get('needs_rewrite', False)),
+                variants_status=cast(
+                    Literal['pending', 'ready', 'failed'],
+                    post.get('variants_status', 'pending')
+                ),
+                buddy_variants=cast(List[Dict[str, Any]], parse_list(post.get('buddy_variants'))),
+                reverse_variants=cast(List[Dict[str, Any]], parse_list(post.get('reverse_variants'))),
+            )
+        elif note_type == 'reference':
             now = datetime.now()
             created_at = parse_datetime(post.get('created'), now)
 
@@ -360,6 +389,97 @@ class ReviewNote(Note):
 
 
 # ================================================================
+# DRILL - Code drill flashcard
+# ================================================================
+@dataclass
+class DrillNote(Note):
+    """Code drill flashcard with ladder-based spaced repetition and three review modes."""
+
+    language: str
+    why_captured: str
+    created_at: datetime
+    last_reviewed: Optional[datetime]
+    next_review: datetime
+    ladder_step: int
+    review_count: int
+    fail_streak: int
+    needs_rewrite: bool
+    variants_status: Literal['pending', 'ready', 'failed']
+
+    type: str = "drill"
+    review_mode: str = "ladder"
+    tags: List[str] = field(default_factory=list)
+    sources: List[Dict[str, str]] = field(default_factory=list)
+    buddy_variants: List[Dict[str, Any]] = field(default_factory=list)
+    reverse_variants: List[Dict[str, Any]] = field(default_factory=list)
+
+    def _get_metadata(self) -> dict:
+        return {
+            'title': self.title,
+            'type': self.type,
+            'language': self.language,
+            'tags': self.tags,
+            'why_captured': self.why_captured,
+            'sources': self.sources,
+            'created': self.created_at.isoformat(),
+            'review_mode': self.review_mode,
+            'ladder_step': self.ladder_step,
+            'next_review': self.next_review.isoformat(),
+            'last_reviewed': self.last_reviewed.isoformat() if self.last_reviewed else None,
+            'review_count': self.review_count,
+            'fail_streak': self.fail_streak,
+            'needs_rewrite': self.needs_rewrite,
+            'variants_status': self.variants_status,
+            'buddy_variants': self.buddy_variants,
+            'reverse_variants': self.reverse_variants,
+        }
+
+    def days_until_review(self) -> int:
+        delta = self.next_review.replace(hour=0, minute=0, second=0, microsecond=0) - \
+                datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        return delta.days
+
+    def parse_prompt_and_answer(self) -> tuple[str, str]:
+        """Extract prompt and model answer from the markdown body.
+
+        Body format:
+            ## Prompt
+            <text>
+
+            ## Model Answer
+            ```<language>
+            <code>
+            ```
+        """
+        return DrillNote.parse_body(self.body)
+
+    @staticmethod
+    def parse_body(body: str) -> tuple[str, str]:
+        """Parse a drill body into (prompt, model_answer)."""
+        prompt_match = re.search(
+            r'^##\s+Prompt\s*\n(.*?)(?=^##\s+Model Answer|\Z)',
+            body, re.MULTILINE | re.DOTALL
+        )
+        answer_match = re.search(
+            r'^##\s+Model Answer\s*\n(.*?)\Z',
+            body, re.MULTILINE | re.DOTALL
+        )
+        prompt = prompt_match.group(1).strip() if prompt_match else ""
+        raw_answer = answer_match.group(1).strip() if answer_match else ""
+        fence = re.match(r'^```[^\n]*\n(.*?)\n```\s*$', raw_answer, re.DOTALL)
+        answer = fence.group(1) if fence else raw_answer
+        return prompt, answer
+
+    @staticmethod
+    def build_body(prompt: str, model_answer: str, language: str) -> str:
+        """Render the markdown body from structured parts."""
+        return (
+            f"## Prompt\n\n{prompt.strip()}\n\n"
+            f"## Model Answer\n\n```{language}\n{model_answer.rstrip()}\n```\n"
+        )
+
+
+# ================================================================
 # TASK - Task management
 # ================================================================
 @dataclass
@@ -389,6 +509,12 @@ class Task:
     # Auto-categorization
     confidence: Dict[str, float] = field(default_factory=dict)  # {workspace: 0.85, project: 0.9, ...}
     reasoning: Optional[str] = None  # Why LLM chose these categories
+
+    # Priority link
+    priority_id: Optional[str] = None  # FK to priorities table
+
+    # Daily pin (max 3 at a time)
+    pinned: bool = False
 
     filename: str = ""  # Generated from id
 

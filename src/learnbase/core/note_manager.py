@@ -7,8 +7,14 @@ import re
 import logging
 import json
 
-from .models import Note, ReviewNote, ReferenceNote, EvergreenNote
-from .spaced_rep import calculate_next_review, calculate_scheduled_review
+from .models import Note, ReviewNote, ReferenceNote, EvergreenNote, DrillNote
+from .spaced_rep import (
+    calculate_next_review,
+    calculate_scheduled_review,
+    calculate_ladder_review,
+    LADDER_INTERVALS,
+    REWRITE_FAIL_THRESHOLD,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -327,14 +333,16 @@ class NoteManager:
             return None
 
     def _sort_notes_by_review_date(self, notes: List[Note]) -> List[Note]:
-        """Sort notes: ReviewNotes first by next_review, then ReferenceNotes and EvergreenNotes by title."""
+        """Sort notes: ReviewNotes and DrillNotes first by next_review, then ReferenceNotes and EvergreenNotes by title."""
         review_notes = [n for n in notes if isinstance(n, ReviewNote)]
+        drill_notes = [n for n in notes if isinstance(n, DrillNote)]
         reference_notes = [n for n in notes if isinstance(n, ReferenceNote)]
         evergreen_notes = [n for n in notes if isinstance(n, EvergreenNote)]
         review_notes.sort(key=lambda n: n.next_review)
+        drill_notes.sort(key=lambda n: n.next_review)
         reference_notes.sort(key=lambda n: n.title)
         evergreen_notes.sort(key=lambda n: n.title)
-        return review_notes + reference_notes + evergreen_notes
+        return review_notes + drill_notes + reference_notes + evergreen_notes
 
     def get_all_notes(self) -> List[Note]:
         """
@@ -599,13 +607,13 @@ class NoteManager:
 
     def get_all_notes_by_type(
         self,
-        note_type: Optional[Literal['review', 'reference', 'evergreen']] = None
+        note_type: Optional[Literal['review', 'reference', 'evergreen', 'drill']] = None
     ) -> List[Note]:
         """
         Get all notes, optionally filtered by type.
 
         Args:
-            note_type: Filter by 'review', 'reference', or 'evergreen', or None for all notes
+            note_type: Filter by 'review', 'reference', 'evergreen', or 'drill', or None for all notes
 
         Returns:
             List of Note instances
@@ -617,7 +625,213 @@ class NoteManager:
             return [n for n in notes if isinstance(n, ReferenceNote)]
         elif note_type == 'evergreen':
             return [n for n in notes if isinstance(n, EvergreenNote)]
+        elif note_type == 'drill':
+            return [n for n in notes if isinstance(n, DrillNote)]
         return notes
+
+    # ================================================================
+    # Drill card operations (code flashcards — ladder SR, three modes)
+    # ================================================================
+
+    def create_drill_note(
+        self,
+        title: str,
+        prompt: str,
+        model_answer: str,
+        language: str,
+        why_captured: str = "",
+        tags: Optional[List[str]] = None,
+        buddy_variants: Optional[List[Dict[str, Any]]] = None,
+        reverse_variants: Optional[List[Dict[str, Any]]] = None,
+        variants_status: Literal['pending', 'ready', 'failed'] = 'pending',
+    ) -> str:
+        """Create a new drill card.
+
+        Args:
+            title: Short human-readable title.
+            prompt: Question / goal text (multi-line allowed).
+            model_answer: Reference solution code.
+            language: Code language (bash, python, sql, regex, ...).
+            why_captured: One-line context for future-you.
+            tags: Optional freeform tags.
+            buddy_variants / reverse_variants: Pre-generated AI variants (optional).
+            variants_status: 'ready' if variants supplied, else 'pending' / 'failed'.
+
+        Returns:
+            Filename of the created drill card.
+        """
+        if not title or not title.strip():
+            raise ValueError("Title cannot be empty")
+        if len(title) > 200:
+            raise ValueError("Title cannot exceed 200 characters")
+        if not prompt or not prompt.strip():
+            raise ValueError("Prompt cannot be empty")
+        if not model_answer or not model_answer.strip():
+            raise ValueError("Model answer cannot be empty")
+        if not language or not language.strip():
+            raise ValueError("Language cannot be empty")
+
+        logger.debug(f"Creating drill note: title='{title[:50]}', language={language}")
+
+        # Filenames prefixed with "drill-" to make the type recognisable on disk.
+        base = Note.create_filename(title)
+        prefixed = f"drill-{base}" if not base.startswith("drill-") else base
+        filepath = self.notes_dir / prefixed
+
+        if filepath.exists():
+            filename, filepath = self._create_unique_filename(prefixed)
+        else:
+            import os
+            try:
+                fd = os.open(str(filepath), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+                os.close(fd)
+                filename = prefixed
+            except FileExistsError:
+                filename, filepath = self._create_unique_filename(prefixed)
+
+        now = datetime.now()
+        body = DrillNote.build_body(prompt, model_answer, language)
+
+        drill = DrillNote(
+            filename=filename,
+            title=title,
+            body=body,
+            language=language,
+            tags=tags or [],
+            why_captured=why_captured,
+            sources=[],
+            created_at=now,
+            last_reviewed=None,
+            next_review=now,  # due immediately for first review
+            ladder_step=0,
+            review_count=0,
+            fail_streak=0,
+            needs_rewrite=False,
+            variants_status=variants_status,
+            buddy_variants=buddy_variants or [],
+            reverse_variants=reverse_variants or [],
+        )
+
+        self._save_note(drill, filepath)
+        self._auto_index_note(filename, operation="index")
+        self.update_readme_index()
+
+        logger.info(f"Created drill note: {filename} (language={language})")
+        return filename
+
+    def update_drill_variants(
+        self,
+        filename: str,
+        buddy_variants: List[Dict[str, Any]],
+        reverse_variants: List[Dict[str, Any]],
+        variants_status: Literal['ready', 'failed'] = 'ready',
+    ) -> None:
+        """Persist AI-generated variants onto an existing drill card."""
+        self._validate_filename(filename)
+        note = self._get_note_or_raise(filename)
+        if not isinstance(note, DrillNote):
+            raise ValueError(f"Note '{filename}' is not a drill card")
+
+        note.buddy_variants = buddy_variants
+        note.reverse_variants = reverse_variants
+        note.variants_status = variants_status
+
+        filepath = self.notes_dir / filename
+        self._save_note(note, filepath)
+        self._auto_index_note(filename, operation="index")
+        logger.info(f"Updated variants for {filename}: status={variants_status}")
+
+    def update_drill_review(
+        self,
+        filename: str,
+        passed: bool,
+        is_first_mode: bool = True,
+    ) -> DrillNote:
+        """Record a drill review.
+
+        Args:
+            filename: Drill card filename.
+            passed: User's self-assessment.
+            is_first_mode: Only the first mode attempted per session updates SR;
+                subsequent mode attempts on the same card are free practice.
+
+        Returns:
+            Updated DrillNote.
+        """
+        self._validate_filename(filename)
+        note = self._get_note_or_raise(filename)
+        if not isinstance(note, DrillNote):
+            raise ValueError(f"Note '{filename}' is not a drill card")
+
+        if is_first_mode:
+            new_step, _, next_review, new_fail_streak = calculate_ladder_review(
+                passed=passed,
+                current_step=note.ladder_step,
+                fail_streak=note.fail_streak,
+            )
+            note.ladder_step = new_step
+            note.next_review = next_review
+            note.fail_streak = new_fail_streak
+            # Escalation: flag for rewrite after N consecutive fails.
+            # Clear the flag on a successful pass.
+            if passed:
+                note.needs_rewrite = False
+            elif new_fail_streak >= REWRITE_FAIL_THRESHOLD:
+                note.needs_rewrite = True
+
+        note.last_reviewed = datetime.now()
+        note.review_count += 1
+
+        filepath = self.notes_dir / filename
+        self._save_note(note, filepath)
+        self._auto_index_note(filename, operation="index")
+        self.update_readme_index()
+
+        logger.info(
+            f"Drill review: {filename} passed={passed} first_mode={is_first_mode} "
+            f"step={note.ladder_step} fail_streak={note.fail_streak}"
+        )
+        return note
+
+    def get_due_drills(self, limit: Optional[int] = None) -> List[DrillNote]:
+        """Return drill cards whose next_review is today or earlier."""
+        all_drills = [n for n in self.get_all_notes() if isinstance(n, DrillNote)]
+        now = datetime.now()
+        due = [d for d in all_drills if d.next_review <= now]
+        due.sort(key=lambda d: d.next_review)
+        if limit:
+            due = due[:limit]
+        return due
+
+    def find_similar_drills(
+        self,
+        prompt: str,
+        threshold: float = 0.75,
+        limit: int = 3,
+    ) -> List[Dict[str, Any]]:
+        """Return drill cards semantically similar to the given prompt text.
+
+        Uses the existing RAG manager. Falls back to empty list if RAG is unavailable.
+        """
+        if not self.rag_manager or not self.rag_manager.is_available():
+            return []
+        try:
+            results = self.rag_manager.search_notes(query=prompt, limit=limit * 2)
+        except Exception as e:
+            logger.warning(f"Similarity search failed: {e}")
+            return []
+
+        matches = []
+        for r in results:
+            if r.get('note_type') != 'drill':
+                continue
+            sim = r.get('similarity')
+            if sim is None or sim < threshold:
+                continue
+            matches.append(r)
+            if len(matches) >= limit:
+                break
+        return matches
 
     def get_stats(self) -> Dict[str, Any]:
         """
@@ -628,6 +842,7 @@ class NoteManager:
         """
         all_notes = self.get_all_notes()
         review_notes = [n for n in all_notes if isinstance(n, ReviewNote)]
+        drill_notes = [n for n in all_notes if isinstance(n, DrillNote)]
         reference_notes = [n for n in all_notes if isinstance(n, ReferenceNote)]
         evergreen_notes = [n for n in all_notes if isinstance(n, EvergreenNote)]
 
@@ -635,9 +850,10 @@ class NoteManager:
         today_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
         week_end = now + timedelta(days=7)
 
-        # Count due notes (only ReviewNotes can be due)
+        # Count due notes (ReviewNotes and DrillNotes both have next_review)
         due_today = [n for n in review_notes if n.next_review <= today_end]
         due_week = [n for n in review_notes if today_end < n.next_review <= week_end]
+        drills_due_today = [d for d in drill_notes if d.next_review <= today_end]
 
         # Count reviewed today (using date comparison)
         today_date = now.date()
@@ -655,6 +871,9 @@ class NoteManager:
             "review_notes": len(review_notes),
             "reference_notes": len(reference_notes),
             "evergreen_notes": len(evergreen_notes),
+            "drill_notes": len(drill_notes),
+            "drills_due_today": len(drills_due_today),
+            "drills_needing_rewrite": len([d for d in drill_notes if d.needs_rewrite]),
             "reviewed_today": len(reviewed_today),
             "due_today": len(due_today),
             "due_this_week": len(due_week),
@@ -698,6 +917,14 @@ class NoteManager:
                 lines.append(
                     f"| {note.filename} | {note.title[:40]} | review | {note.review_mode} | "
                     f"{next_review_str} | {note.review_count} | {note.ease_factor:.2f} |"
+                )
+            elif isinstance(note, DrillNote):
+                next_review_str = note.next_review.strftime('%Y-%m-%d')
+                mode_label = f"drill ({note.language})"
+                ease_col = f"step {note.ladder_step}"
+                lines.append(
+                    f"| {note.filename} | {note.title[:40]} | drill | {mode_label} | "
+                    f"{next_review_str} | {note.review_count} | {ease_col} |"
                 )
             elif isinstance(note, EvergreenNote):
                 lines.append(

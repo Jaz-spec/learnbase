@@ -179,3 +179,42 @@ PRESET_SCHEDULES = {
     "moderate": "1d,1w,2w,1m,3m,6m",        # Recommended default
     "relaxed": "1w,2w,1m,2m,6m,1y"          # Long-term retention
 }
+
+
+# Ladder review mode — pass/fail with fixed interval progression
+# Used by DrillNote. On pass: step += 1 (capped). On fail: step -= 1 (floored at 0).
+# Three consecutive fails flag the card for rewrite (caller responsibility).
+LADDER_INTERVALS: List[int] = [1, 3, 7, 14, 30, 90, 180]
+
+# Caller should mark needs_rewrite=True when fail_streak reaches this value.
+REWRITE_FAIL_THRESHOLD = 3
+
+
+def calculate_ladder_review(
+    passed: bool,
+    current_step: int,
+    fail_streak: int
+) -> Tuple[int, int, datetime, int]:
+    """Calculate the next ladder review for a drill card.
+
+    Args:
+        passed: True if the user passed; False otherwise.
+        current_step: Current index into LADDER_INTERVALS.
+        fail_streak: Current consecutive-fail count.
+
+    Returns:
+        Tuple of (new_step, new_interval_days, next_review_date, new_fail_streak).
+    """
+    max_step = len(LADDER_INTERVALS) - 1
+
+    if passed:
+        new_step = min(current_step + 1, max_step)
+        new_fail_streak = 0
+    else:
+        new_step = max(current_step - 1, 0)
+        new_fail_streak = fail_streak + 1
+
+    new_interval = LADDER_INTERVALS[new_step]
+    next_review_date = datetime.now() + timedelta(days=new_interval)
+
+    return new_step, new_interval, next_review_date, new_fail_streak
