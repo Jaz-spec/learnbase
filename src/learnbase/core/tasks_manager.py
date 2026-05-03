@@ -48,11 +48,11 @@ class TasksManager:
                 """INSERT INTO tasks
                    (id, title, description, categories, workspace, project,
                     due, status, dependencies, created, updated, completed,
-                    confidence, reasoning, archived)
+                    confidence, reasoning, priority_id, archived)
                    VALUES
                    (:id, :title, :description, :categories, :workspace, :project,
                     :due, :status, :dependencies, :created, :updated, :completed,
-                    :confidence, :reasoning, :archived)""",
+                    :confidence, :reasoning, :priority_id, :archived)""",
                 row,
             )
             self.conn.commit()
@@ -96,7 +96,7 @@ class TasksManager:
                    workspace=:workspace, project=:project, due=:due, status=:status,
                    dependencies=:dependencies, created=:created, updated=:updated,
                    completed=:completed, confidence=:confidence, reasoning=:reasoning,
-                   archived=:archived
+                   priority_id=:priority_id, archived=:archived
                    WHERE id=:id""",
                 row,
             )

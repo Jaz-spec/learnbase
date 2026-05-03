@@ -21,6 +21,7 @@ def handle_create_task_tool(manager: TasksManager, arguments: Any) -> list[TextC
     project = arguments.get("project")
     confidence = arguments.get("confidence", {})
     reasoning = arguments.get("reasoning")
+    priority_id = arguments.get("priority_id")
 
     if not title or not due:
         return [TextContent(
@@ -46,7 +47,8 @@ def handle_create_task_tool(manager: TasksManager, arguments: Any) -> list[TextC
             due=due_date,
             status='pending',
             confidence=confidence,
-            reasoning=reasoning
+            reasoning=reasoning,
+            priority_id=priority_id,
         )
 
         # Set filename
