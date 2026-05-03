@@ -32,6 +32,9 @@ Dockerised scheduler that sends macOS desktop notifications for calendar events.
 ### Note Validation
 Research and verify note accuracy against primary sources. Assigns confidence scores and suggests amendments.
 
+### Drill Cards
+Code flashcards for keeping useful-but-infrequent skills sharp (shell one-liners, regex, SQL idioms). Pass/fail spaced repetition on a fixed interval ladder. Three review modes per card — produce from blank (Drill), repair a broken variant (Buddy), or judge a candidate (Reverse). Capture from chat, a zsh `Ctrl+X Ctrl+D` hotkey, or the bundled retro neon-yellow TUI (`learnbase-drill`). See [`docs/drill-cards.md`](docs/drill-cards.md).
+
 ## Architecture
 
 ```

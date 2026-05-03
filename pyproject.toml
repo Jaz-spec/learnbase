@@ -14,6 +14,7 @@ dependencies = [
     "pyyaml>=6.0",
     "chromadb>=0.4.0",
     "sentence-transformers>=2.2.0",
+    "anthropic>=0.40.0",
 ]
 
 [project.optional-dependencies]
@@ -23,9 +24,6 @@ dev = [
 openai = [
     "openai>=1.0.0",
 ]
-
-[project.scripts]
-learnbase-gui = "learnbase.gui.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
